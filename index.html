@@ -42,6 +42,13 @@
         <div id="status-track" class="status-track">Radio</div>
         <div id="status-scope" class="status-scope"></div>
       </div>
+      <button id="btn-refresh" class="menu-btn icon-btn" aria-label="刷新列表" title="刷新列表(从 OneDrive 重新拉)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12a9 9 0 0 1-15.36 6.36L3 16M3 12a9 9 0 0 1 15.36-6.36L21 8"/>
+          <polyline points="21 3 21 8 16 8"/>
+          <polyline points="3 21 3 16 8 16"/>
+        </svg>
+      </button>
       <button id="menu-toggle" class="menu-btn" aria-label="菜单" title="菜单">
         <span></span><span></span><span></span>
       </button>
@@ -102,7 +109,6 @@
                  orient="vertical" aria-label="音量" />
         </div>
       </section>
-      <div class="safe-bottom" aria-hidden="true"></div>
     </main>
   </div>
 
@@ -177,6 +183,10 @@
     <span class="update-text">有新版本可用</span>
     <button id="btn-update-reload" class="ghost">刷新</button>
     <button id="btn-update-dismiss" class="ghost" aria-label="忽略">×</button>
+  </div>
+
+  <div id="transient-toast" class="update-toast" hidden role="status" aria-live="polite">
+    <span id="transient-toast-text" class="update-text"></span>
   </div>
 
   <div id="tap-overlay" class="tap-overlay" hidden role="button" tabindex="0" aria-label="点击继续播放">

@@ -86,14 +86,10 @@ body {
   background: var(--bg-surface);
   border-left: 1px solid var(--hairline);
   border-right: 1px solid var(--hairline);
-}
-
-/* Home indicator 区:与控件 cell 同色的 bg-surface 一条,直通屏底。
-   内容(图标/字)还停在 .controls 的 9rem 安全区里,系统横条只压这条空白 */
-.safe-bottom {
-  flex-shrink: 0;
-  height: env(safe-area-inset-bottom);
-  background: var(--bg-surface);
+  /* 必须的!iOS 在 home indicator 区会强制截 viewport,不留这条 padding 的话
+     .controls 底部直接被切掉。bg-surface 在 padding 里继续,跟 cells 同色,
+     视觉上是 controls 的延伸 */
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* === Top bar === */
@@ -156,6 +152,19 @@ body {
   height: 1.5px;
   background: currentColor;
   opacity: 0.7;
+}
+
+.menu-btn.icon-btn svg {
+  width: 16px;
+  height: 16px;
+  opacity: 0.7;
+}
+.menu-btn.icon-btn.spinning svg {
+  animation: refresh-spin 0.8s linear infinite;
+}
+@keyframes refresh-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
 .menu-btn:hover { background: var(--hover); }

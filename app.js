@@ -66,6 +66,9 @@ const menuToggle = $("menu-toggle");
 const menuClose = $("menu-close");
 const menuDrawer = $("menu-drawer");
 const menuBackdrop = $("menu-backdrop");
+const btnRefresh = $("btn-refresh");
+const transientToast = $("transient-toast");
+const transientToastText = $("transient-toast-text");
 const cacheInfoEl = $("cache-info");
 const btnCacheClear = $("btn-cache-clear");
 const cacheCapInput = $("cache-cap-input");
@@ -189,6 +192,7 @@ function getCoverUrl(driveItem) {
 }
 
 const browserSection = document.querySelector(".browser");
+let currentCoverUrl = null;  // 给 Media Session metadata.artwork 用
 
 async function applyCoverBackground(driveItem) {
   if (!driveItem || !browserSection) return;
@@ -204,8 +208,12 @@ async function applyCoverBackground(driveItem) {
   if (url) {
     document.documentElement.style.setProperty("--cover-bg", `url("${url}")`);
     browserSection.classList.add("has-cover");
+    currentCoverUrl = url;
+    // 拿到封面后顺手更新 Media Session 的 artwork(iOS 锁屏会显示)
+    updateMediaSessionMetadata();
   } else {
     browserSection.classList.remove("has-cover");
+    currentCoverUrl = null;
   }
 }
 
@@ -486,6 +494,7 @@ async function backgroundCacheTrack(driveItem, options = {}) {
     });
     if (!ok) {
       log(`未缓存(容量塞不下): ${driveItem.name} ${cache.formatBytes(blob.size)}`);
+      showTransientToast(`「${displayName(driveItem.name)}」装不下,缓存上限到了`);
       return false;
     }
     log(`已缓存: ${driveItem.name} ${cache.formatBytes(blob.size)}${options.pinAfter ? " · pinned" : ""}`);
@@ -889,11 +898,18 @@ function hasMediaSession() {
 
 function updateMediaSessionMetadata() {
   if (!hasMediaSession() || !state.currentTrack) return;
-  navigator.mediaSession.metadata = new MediaMetadata({
+  const meta = {
     title: displayName(state.currentTrack.name),
     artist: "Background Radio",
     album: currentBrowsePath() || "/",
-  });
+  };
+  // iOS / Windows 锁屏会用 artwork 显示封面
+  if (currentCoverUrl) {
+    meta.artwork = [
+      { src: currentCoverUrl, sizes: "800x800", type: "image/jpeg" },
+    ];
+  }
+  navigator.mediaSession.metadata = new MediaMetadata(meta);
 }
 
 function setMSHandler(action, handler) {
@@ -1124,6 +1140,36 @@ btnLogout.addEventListener("click", async () => {
   btnLogout.hidden = true;
   folderListEl.innerHTML = '<li class="entry empty">未登录</li>';
   log("已登出(仅本地缓存)");
+});
+
+// === Transient toast(短暂提示) ===
+let transientToastTimer = null;
+function showTransientToast(msg, ms = 3000) {
+  if (!transientToast || !transientToastText) return;
+  transientToastText.textContent = msg;
+  transientToast.hidden = false;
+  if (transientToastTimer) clearTimeout(transientToastTimer);
+  transientToastTimer = setTimeout(() => {
+    transientToast.hidden = true;
+  }, ms);
+}
+
+// === 顶栏刷新按钮:从 OneDrive 重拉当前文件夹 listing ===
+btnRefresh?.addEventListener("click", async () => {
+  if (offlineMode) {
+    showTransientToast("离线模式,无法刷新");
+    return;
+  }
+  if (!isSignedIn()) {
+    showTransientToast("未登录");
+    return;
+  }
+  btnRefresh.classList.add("spinning");
+  try {
+    await renderBrowser();
+  } finally {
+    btnRefresh.classList.remove("spinning");
+  }
 });
 
 // === Menu drawer ===
