@@ -1,0 +1,405 @@
+/* === 调色板:磨砂玻璃 + 低饱和 + Win8 扁平骨架 === */
+:root {
+  --font: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+
+  /* light theme:温暖米白底 + 冷调灰蓝玻璃 */
+  --bg-1: #e8e6e1;
+  --bg-2: #d4d1cb;
+  --bg-tint: #c8c5be;
+  --fg: #2b2b2e;
+  --fg-soft: #6b6b6f;
+  --glass-bg: rgba(255, 255, 255, 0.42);
+  --glass-bg-strong: rgba(255, 255, 255, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.55);
+  --glass-shadow: rgba(0, 0, 0, 0.06);
+  --hover: rgba(255, 255, 255, 0.45);
+  --active: rgba(120, 140, 160, 0.18);
+  --accent: #6f8ba0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-1: #2a2c30;
+    --bg-2: #1a1c1f;
+    --bg-tint: #20232a;
+    --fg: #e8e6e1;
+    --fg-soft: #9a9a9d;
+    --glass-bg: rgba(255, 255, 255, 0.06);
+    --glass-bg-strong: rgba(255, 255, 255, 0.10);
+    --glass-border: rgba(255, 255, 255, 0.10);
+    --glass-shadow: rgba(0, 0, 0, 0.4);
+    --hover: rgba(255, 255, 255, 0.05);
+    --active: rgba(140, 170, 200, 0.16);
+    --accent: #93b4cc;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: var(--font);
+  color: var(--fg);
+  font-weight: 300;
+  letter-spacing: 0.02em;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg-1);
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* 底层柔光 —— 给玻璃可以 blur 的素材 */
+.ambient {
+  position: fixed;
+  inset: -10vmax;
+  z-index: -1;
+  background:
+    radial-gradient(60vmax 50vmax at 20% 10%, var(--bg-tint), transparent 60%),
+    radial-gradient(70vmax 60vmax at 80% 90%, var(--bg-2), transparent 55%),
+    linear-gradient(135deg, var(--bg-1), var(--bg-2));
+}
+
+/* === Glass surface === */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.25) inset,
+    0 8px 28px var(--glass-shadow);
+}
+
+/* === Top bar === */
+.top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.7rem 1.25rem;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+
+.brand {
+  font-size: 0.95rem;
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fg-soft);
+}
+
+.auth {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.user {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: var(--fg-soft);
+  font-size: 0.8rem;
+}
+
+/* === Buttons === */
+button {
+  font-family: inherit;
+  font-weight: 300;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  color: var(--fg);
+  padding: 0.45rem 0.85rem;
+  cursor: pointer;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: rgba(255, 255, 255, 0.8);
+}
+
+button:active:not(:disabled) {
+  background: var(--active);
+}
+
+button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ghost {
+  border-radius: 2px;
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+}
+
+/* === Main layout === */
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* === Now playing label === */
+.now-playing {
+  text-align: center;
+  padding: 0.5rem 0 0.25rem;
+}
+
+.track-name {
+  font-size: 1.15rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  word-break: break-word;
+}
+
+.scope-label {
+  margin-top: 0.25rem;
+  color: var(--fg-soft);
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+/* === Browser big-rectangle list === */
+.browser {
+  border-radius: 4px;
+  overflow: hidden;
+  max-height: 45vh;
+}
+
+.entry-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  max-height: 45vh;
+}
+
+.entry {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--glass-border);
+  cursor: pointer;
+  transition: background 0.12s ease;
+  font-size: 0.95rem;
+  font-weight: 400;
+}
+
+.entry:last-child {
+  border-bottom: none;
+}
+
+.entry:hover {
+  background: var(--hover);
+}
+
+.entry.active {
+  background: var(--active);
+  border-left: 3px solid var(--accent);
+  padding-left: calc(1.1rem - 3px);
+}
+
+.entry .icon {
+  width: 1.2rem;
+  text-align: center;
+  color: var(--fg-soft);
+  font-size: 1.05rem;
+  flex-shrink: 0;
+}
+
+.entry .name {
+  flex: 1;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.entry .meta {
+  color: var(--fg-soft);
+  font-size: 0.75rem;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  white-space: nowrap;
+}
+
+.entry.empty {
+  color: var(--fg-soft);
+  font-style: italic;
+  cursor: default;
+  justify-content: center;
+}
+
+.entry.empty:hover {
+  background: transparent;
+}
+
+/* === Controls === */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  border-radius: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.ctrl {
+  width: 3.4rem;
+  height: 3.4rem;
+  padding: 0;
+  border-radius: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.05rem;
+}
+
+.ctrl-glyph {
+  font-size: 1.4rem;
+  line-height: 1;
+  font-weight: 300;
+}
+
+.ctrl-sub {
+  font-size: 0.6rem;
+  color: var(--fg-soft);
+  letter-spacing: 0.05em;
+}
+
+.ctrl-big {
+  width: 5rem;
+  height: 5rem;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ctrl-big .ctrl-glyph {
+  font-size: 1.9rem;
+}
+
+.mode {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: 0.5rem;
+}
+
+.mode-label {
+  font-size: 0.75rem;
+  color: var(--fg-soft);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mode-select {
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--fg);
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  padding: 0.4rem 0.6rem;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+/* === Seek === */
+.seek {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  border-radius: 4px;
+}
+
+.time {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--fg-soft);
+  min-width: 3rem;
+  text-align: center;
+}
+
+#seek-bar {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: rgba(120, 140, 160, 0.25);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+#seek-bar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-1);
+  cursor: pointer;
+  box-shadow: 0 1px 4px var(--glass-shadow);
+}
+
+#seek-bar::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-1);
+  cursor: pointer;
+}
+
+/* === Log === */
+.log-panel {
+  font-size: 0.78rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  background: var(--glass-bg);
+}
+
+.log-panel summary {
+  cursor: pointer;
+  color: var(--fg-soft);
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+}
+
+#log {
+  background: transparent;
+  padding: 0.4rem 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.72rem;
+  max-height: 180px;
+  overflow: auto;
+  margin: 0.4rem 0 0;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: var(--fg-soft);
+}
+
+/* hide audio element visually */
+audio {
+  display: none;
+}

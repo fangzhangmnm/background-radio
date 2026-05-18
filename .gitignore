@@ -1,0 +1,8 @@
+# Local dev / OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Private project journals (not for source control)
+journal/

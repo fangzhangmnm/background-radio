@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Background Radio</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="ambient"></div>
+
+  <header class="top-bar glass">
+    <div class="brand">Background Radio</div>
+    <div class="auth">
+      <span id="user-name" class="user"></span>
+      <button id="btn-login" class="ghost">登录</button>
+      <button id="btn-logout" class="ghost" hidden>登出</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="now-playing">
+      <div class="track-name" id="track-name">未选择</div>
+      <div class="scope-label" id="scope-label"></div>
+    </section>
+
+    <section class="browser glass">
+      <ul id="folder-list" class="entry-list">
+        <li class="entry empty">未登录</li>
+      </ul>
+    </section>
+
+    <section class="controls glass">
+      <button id="btn-rewind" class="ctrl" title="回退 10s">
+        <span class="ctrl-glyph">«</span><span class="ctrl-sub">10s</span>
+      </button>
+      <button id="btn-play" class="ctrl ctrl-big" title="播放 / 暂停">
+        <span id="play-glyph" class="ctrl-glyph">▶</span>
+      </button>
+      <button id="btn-forward" class="ctrl" title="前进 30s">
+        <span class="ctrl-glyph">»</span><span class="ctrl-sub">30s</span>
+      </button>
+      <div class="mode">
+        <label class="mode-label" for="loop-select">循环</label>
+        <select id="loop-select" class="mode-select">
+          <option value="single">单曲</option>
+          <option value="folder" selected>文件夹</option>
+          <option value="stop">放完停</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="seek glass">
+      <span id="pos-current" class="time">0:00</span>
+      <input type="range" id="seek-bar" min="0" max="1000" value="0" step="1" />
+      <span id="pos-duration" class="time">0:00</span>
+    </section>
+
+    <details class="log-panel">
+      <summary>debug log</summary>
+      <pre id="log"></pre>
+    </details>
+
+    <audio id="audio" preload="metadata"></audio>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
