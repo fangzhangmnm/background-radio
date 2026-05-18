@@ -1112,61 +1112,20 @@ for (const r of themeRadios) {
 }
 
 // === Volume ===
-// iOS Safari 的 audio.volume 是只读的(系统硬件键控制)。要做 in-app 音量
-// 必须走 Web Audio API:audio element → createMediaElementSource → GainNode → destination
-// GainNode.gain.value 可以在 iOS 上正常工作。AudioContext 需要在 user gesture 里建。
-let audioContext = null;
-let gainNode = null;
-
-function ensureAudioContext() {
-  if (audioContext) {
-    if (audioContext.state === "suspended") {
-      audioContext.resume().catch(() => {});
-    }
-    return;
-  }
-  try {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) {
-      log("AudioContext 不支持,音量只能靠 audio.volume(iOS 上无效)");
-      return;
-    }
-    audioContext = new AC();
-    const src = audioContext.createMediaElementSource(audio);
-    gainNode = audioContext.createGain();
-    gainNode.gain.value = state.volume;
-    src.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    audioContext.resume().catch(() => {});
-    log("AudioContext 已建立,GainNode 接管音量");
-  } catch (e) {
-    log("AudioContext 建立失败:", e.message);
-  }
-}
-
+// 注意:iOS Safari 的 audio.volume 是只读的(系统硬件键独占),所以 in-app 滑块
+// 在 iOS 上是 cosmetic only。要做真的 in-app 音量需要 Web Audio + GainNode,
+// 但 AudioContext 一旦接到 audio,suspended/running 状态没处理对就完全没声音。
+// 上一次尝试的 Web Audio 路径 PC + iOS 都不出声,先撤回。
 function applyVolume() {
-  audio.volume = state.volume;            // 桌面 + Android 上有效
-  if (gainNode) gainNode.gain.value = state.volume; // iOS 上唯一有效的路径
+  audio.volume = state.volume;
   volumeBar.value = String(Math.round(state.volume * 100));
 }
 
 volumeBar.addEventListener("input", () => {
   state.volume = Number(volumeBar.value) / 100;
   audio.volume = state.volume;
-  if (gainNode) gainNode.gain.value = state.volume;
 });
 volumeBar.addEventListener("change", saveState);
-
-// 首次 user gesture(任何位置的点击 / 触摸)→ 建 AudioContext。
-// iOS 要求 AudioContext.resume() 在 gesture 里发,不然就 suspended 出不来声。
-// 设置好后所有 audio 播放都走 GainNode,音量滑块才有效。
-function setupAudioContextOnFirstGesture() {
-  ensureAudioContext();
-  document.removeEventListener("click", setupAudioContextOnFirstGesture, true);
-  document.removeEventListener("touchstart", setupAudioContextOnFirstGesture, true);
-}
-document.addEventListener("click", setupAudioContextOnFirstGesture, true);
-document.addEventListener("touchstart", setupAudioContextOnFirstGesture, { capture: true, passive: true });
 
 // === Auth controls ===
 btnLogin.addEventListener("click", async () => {
@@ -1392,6 +1351,13 @@ async function restoreSession() {
     // overlay 默认已经显示,title 也在 main() 设过,这里啥都不用做
   }
 }
+
+// iOS 检测:audio.volume 只读 → 音量条无效,直接 UI 上藏掉
+// 也覆盖 iPad 用 desktop UA 的情况(navigator.maxTouchPoints > 1 + Mac UA)
+const IS_IOS =
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+if (IS_IOS) document.body.classList.add("no-volume");
 
 async function main() {
   loadState();

@@ -188,6 +188,24 @@ main {
   background-position: center;
   background-repeat: no-repeat;
   background-attachment: local, local;
+  /* Firefox / Edge 现代滚动条样式 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-deep) transparent;
+}
+/* WebKit (Chrome / Edge / Safari) 自定义滚动条 */
+.browser::-webkit-scrollbar {
+  width: 8px;
+}
+.browser::-webkit-scrollbar-track {
+  background: transparent;
+}
+.browser::-webkit-scrollbar-thumb {
+  background: var(--accent-deep);
+  border-radius: 4px;
+  border: 2px solid var(--bg-surface);
+}
+.browser::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
 }
 
 /* --cover-tint 由 :root 主题定义,无需在这里 override */
@@ -505,6 +523,12 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   justify-content: center;
   gap: 0.4rem;
   width: 2.2rem;
+}
+
+/* iOS:audio.volume 只读,音量条无效,藏掉。grid 第 4 列 auto 自动塌成 0 宽,
+   左右三列重分余下空间 */
+body.no-volume .vol-strip {
+  display: none;
 }
 
 .vol-icon {
