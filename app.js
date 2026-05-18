@@ -50,7 +50,6 @@ const btnPrev = $("btn-prev");
 const btnNext = $("btn-next");
 const btnRewind = $("btn-rewind");
 const btnForward = $("btn-forward");
-const playGlyph = $("play-glyph");
 const statusTrackEl = $("status-track");
 const statusScopeEl = $("status-scope");
 const posCurrentEl = $("pos-current");
@@ -166,7 +165,34 @@ async function listFolder(folderId) {
 }
 
 async function fetchItem(itemId) {
-  return graphGet(`/me/drive/items/${itemId}`);
+  return graphGet(`/me/drive/items/${itemId}?$expand=thumbnails`);
+}
+
+// 从 driveItem 提取封面图 URL(OneDrive 自动提取 ID3 cover art 为 thumbnails)
+function getCoverUrl(driveItem) {
+  const thumb = driveItem?.thumbnails?.[0];
+  return thumb?.large?.url || thumb?.medium?.url || thumb?.small?.url || null;
+}
+
+const browserSection = document.querySelector(".browser");
+
+async function applyCoverBackground(driveItem) {
+  if (!driveItem || !browserSection) return;
+  let url = getCoverUrl(driveItem);
+  // 列表里来的 driveItem 没有 thumbnails 字段(listFolder 没 expand)→ 单独问
+  if (!url) {
+    try {
+      const resp = await graphGet(`/me/drive/items/${driveItem.id}/thumbnails`);
+      const thumb = resp.value?.[0];
+      url = thumb?.large?.url || thumb?.medium?.url || thumb?.small?.url || null;
+    } catch (_) {}
+  }
+  if (url) {
+    document.documentElement.style.setProperty("--cover-bg", `url("${url}")`);
+    browserSection.classList.add("has-cover");
+  } else {
+    browserSection.classList.remove("has-cover");
+  }
 }
 
 // === Display helpers ===
@@ -288,7 +314,7 @@ async function goUp() {
 
 // === Playback ===
 function setPlayGlyph() {
-  playGlyph.textContent = audio.paused ? "▶" : "❚❚";
+  btnPlay.classList.toggle("paused", audio.paused);
 }
 
 // 当前 audio.src 的来源,失败处理 / blob 释放都需要知道
@@ -427,6 +453,9 @@ async function playTrack(driveItem, startAt = null) {
   // 记下这首被加载过
   state.everPlayed[driveItem.id] = true;
   saveState();
+
+  // 封面图作 listview 淡背景(异步,不阻塞)
+  applyCoverBackground(driveItem).catch(() => {});
 
   restorePositionOnLoadedMetadata = startAt;
 
