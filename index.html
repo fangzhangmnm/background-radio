@@ -85,6 +85,12 @@
     <audio id="audio" preload="metadata"></audio>
   </main>
 
+  <div id="update-toast" class="update-toast glass" hidden role="status" aria-live="polite">
+    <span class="update-text">有新版本可用</span>
+    <button id="btn-update-reload" class="ghost">刷新</button>
+    <button id="btn-update-dismiss" class="ghost" aria-label="忽略">×</button>
+  </div>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>

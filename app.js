@@ -624,9 +624,29 @@ async function restoreSession() {
   trackNameEl.textContent = state.currentTrack.name;
   scopeLabelEl.textContent = `恢复中:position=${formatTime(state.position)}`;
   posCurrentEl.textContent = formatTime(state.position);
-  // Don't auto-set audio.src yet — iOS PWA can't autoplay without gesture anyway.
-  // 点击 play 按钮再装载 src。
   log("恢复:", state.currentTrack.name, "@", formatTime(state.position));
+
+  // 尝试 autoplay。系统允许(装机 PWA + 之前点过 gesture 攒了 engagement)就接着放;
+  // 不允许(iOS 标准、首次访问)就静默失败,等用户点 ▶。
+  try {
+    const fresh = await fetchItem(state.currentTrack.id);
+    audio.src = fresh["@microsoft.graph.downloadUrl"];
+    restorePositionOnLoadedMetadata =
+      state.positions[state.currentTrack.id] ?? state.position ?? 0;
+    // 加载同级文件以备 prev/next + Media Session
+    if (state.currentTrack.parentFolderId) {
+      try {
+        const siblings = await listFolder(state.currentTrack.parentFolderId);
+        trackFolderItems = siblings.filter(isAudio);
+      } catch (e) {
+        log("加载同级文件失败:", e.message);
+      }
+    }
+    await audio.play();
+    log("autoplay 成功");
+  } catch (e) {
+    log("autoplay 被拒(正常,等点 ▶):", e.message);
+  }
 }
 
 async function main() {
@@ -663,13 +683,44 @@ async function main() {
 
 main().catch((e) => log("启动失败:", e.message));
 
-// === Service worker 注册 ===
-// 不阻塞 main(),失败也不要紧(SW 在 http://localhost 上能跑;file:// 不行)
+// === Service worker 注册 + auto-update toast ===
+// SW 后台 revalidate;ETag/length 变了就 postMessage,我们弹 toast,用户点刷新才 reload
+// (永不自动 reload,可能正在放歌)
+const updateToast = $("update-toast");
+const btnUpdateReload = $("btn-update-reload");
+const btnUpdateDismiss = $("btn-update-dismiss");
+
+function showUpdateToast() {
+  updateToast.hidden = false;
+}
+function hideUpdateToast() {
+  updateToast.hidden = true;
+}
+
+btnUpdateDismiss?.addEventListener("click", hideUpdateToast);
+btnUpdateReload?.addEventListener("click", async () => {
+  hideUpdateToast();
+  try {
+    if (navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: "skip-waiting" });
+    }
+  } catch (_) {}
+  // 持久化位置,reload 之后 resume 接着放
+  if (state.currentTrack) persistPosition();
+  location.reload();
+});
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register("./service-worker.js")
       .then((reg) => log("SW 已注册 scope=", reg.scope))
       .catch((e) => log("SW 注册失败:", e.message));
+  });
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "asset-updated") {
+      log("SW 报告:", event.data.url, "有新版本");
+      showUpdateToast();
+    }
   });
 }
