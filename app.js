@@ -248,14 +248,23 @@ function setPlayGlyph() {
 }
 
 async function playTrack(driveItem, startAt = null) {
+  // 切歌前把当前正在播的位置存进 map(模式如果允许后续恢复就用得上)
+  // 但如果当前曲已经自然 ended,不要把"末尾位置"重新写回 map —— handleEnded 刚清掉它
+  if (
+    state.currentTrack &&
+    state.currentTrack.id !== driveItem.id &&
+    !audio.ended
+  ) {
+    persistPosition();
+  }
   // startAt 语义:
-  //   null  → 自动从 per-track map 恢复(浏览器点击时用)
-  //   0     → 显式从头开始(folder loop 自动进下一首时用)
-  //   N>0   → 跳到 N(resume on open 时用)
+  //   null  → 默认行为:单曲模式从 map 恢复,其它模式从 0
+  //   0     → 显式从头(folder 自动 advance 时用)
+  //   N>0   → 跳到 N(app-open resume 时用)
   if (startAt === null) {
-    startAt = state.positions[driveItem.id] ?? 0;
-  } else if (startAt === 0) {
-    delete state.positions[driveItem.id];
+    startAt = state.mode === "single"
+      ? (state.positions[driveItem.id] ?? 0)
+      : 0;
   }
 
   log(`load: ${driveItem.name} @ ${startAt}s`);
@@ -335,7 +344,8 @@ async function refetchDownloadUrlAndResume() {
   }
 }
 
-async function advance(direction) {
+// startAt: 0 = 显式从头(folder auto-advance 用),null = 跟模式决定(用户点 prev/next 用)
+async function advance(direction, startAt = null) {
   if (!state.currentTrack || !trackFolderItems || trackFolderItems.length === 0) {
     audio.pause();
     setPlayGlyph();
@@ -343,8 +353,7 @@ async function advance(direction) {
   }
   const idx = trackFolderItems.findIndex((t) => t.id === state.currentTrack.id);
   if (idx === -1) {
-    // current track removed from folder; jump to first
-    await playTrack(trackFolderItems[0], 0);
+    await playTrack(trackFolderItems[0], startAt);
     return;
   }
   const lastIdx = trackFolderItems.length - 1;
@@ -354,26 +363,25 @@ async function advance(direction) {
   } else {
     nextIdx = idx === 0 ? lastIdx : idx - 1;
   }
-  await playTrack(trackFolderItems[nextIdx], 0);
+  await playTrack(trackFolderItems[nextIdx], startAt);
 }
 
 function handleEnded() {
   log(`ended; mode=${state.mode}`);
-  // 这首播完了,从 per-track map 移掉,下次再播这首从头开始
+  // 这首播完了:map 项删除 + state.position 归 0(避免 reload 后从近末尾恢复又立刻 ended)
   if (state.currentTrack) {
     delete state.positions[state.currentTrack.id];
+    state.position = 0;
     saveState();
   }
   if (state.mode === "single") {
     audio.currentTime = 0;
     audio.play().catch((e) => log("repeat play 失败:", e.message));
   } else if (state.mode === "folder") {
-    advance("next");
+    advance("next", 0);  // 显式从头:folder 自动 advance 永远新开
   } else {
     // stop
     audio.pause();
-    state.position = 0;
-    saveState();
     setPlayGlyph();
   }
 }
@@ -452,10 +460,8 @@ function updateMediaSessionHandlers() {
       updateMediaSessionPosition();
     }
   });
-  // 单曲循环时锁屏按 prev/next 也不该跳曲
-  const nav = state.mode === "single" ? null : (dir) => advance(dir);
-  setMSHandler("previoustrack", nav ? () => nav("prev") : null);
-  setMSHandler("nexttrack", nav ? () => nav("next") : null);
+  setMSHandler("previoustrack", () => advance("prev"));
+  setMSHandler("nexttrack", () => advance("next"));
 }
 
 function updateMediaSessionPosition() {
@@ -570,10 +576,7 @@ btnNext.addEventListener("click", () => advance("next"));
 
 function applyModeUi() {
   loopSelect.value = state.mode;
-  // single 循环时藏掉 prev/next(proposal:"上一首/下一首 folder loop 时才有")
-  btnPrev.hidden = state.mode === "single";
-  btnNext.hidden = state.mode === "single";
-  // Media Session 也得跟着改,否则锁屏按钮失效
+  // prev/next 任何模式都显示;Media Session handler 也总在
   updateMediaSessionHandlers();
 }
 
