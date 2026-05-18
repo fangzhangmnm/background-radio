@@ -31,14 +31,20 @@
     </section>
 
     <section class="controls glass">
-      <button id="btn-rewind" class="ctrl" title="回退 10s">
+      <button id="btn-prev" class="ctrl" title="上一首" aria-label="上一首">
+        <span class="ctrl-glyph">⏮</span>
+      </button>
+      <button id="btn-rewind" class="ctrl" title="回退 10s" aria-label="回退 10 秒">
         <span class="ctrl-glyph">«</span><span class="ctrl-sub">10s</span>
       </button>
-      <button id="btn-play" class="ctrl ctrl-big" title="播放 / 暂停">
+      <button id="btn-play" class="ctrl ctrl-big" title="播放 / 暂停" aria-label="播放或暂停">
         <span id="play-glyph" class="ctrl-glyph">▶</span>
       </button>
-      <button id="btn-forward" class="ctrl" title="前进 30s">
+      <button id="btn-forward" class="ctrl" title="前进 30s" aria-label="前进 30 秒">
         <span class="ctrl-glyph">»</span><span class="ctrl-sub">30s</span>
+      </button>
+      <button id="btn-next" class="ctrl" title="下一首" aria-label="下一首">
+        <span class="ctrl-glyph">⏭</span>
       </button>
       <div class="mode">
         <label class="mode-label" for="loop-select">循环</label>
@@ -52,8 +58,15 @@
 
     <section class="seek glass">
       <span id="pos-current" class="time">0:00</span>
-      <input type="range" id="seek-bar" min="0" max="1000" value="0" step="1" />
+      <input type="range" id="seek-bar" min="0" max="1000" value="0" step="1" aria-label="进度" />
       <span id="pos-duration" class="time">0:00</span>
+    </section>
+
+    <section class="volume glass">
+      <svg class="vol-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+        <path d="M3 9v6h4l5 4V5L7 9H3zm12 0v6c1.66 0 3-1.34 3-3s-1.34-3-3-3z"/>
+      </svg>
+      <input type="range" id="volume-bar" min="0" max="100" value="80" step="1" aria-label="音量" />
     </section>
 
     <details class="log-panel">

@@ -22,8 +22,12 @@ const defaultState = {
   currentTrack: null, // { id, name, parentFolderId }
   // loop behavior on `ended`
   mode: "folder", // "single" | "folder" | "stop"
-  // resume position (seconds)
+  // current track's last position (mirror of positions[currentTrack.id], kept for convenience)
   position: 0,
+  // per-track resume position map (trackId -> seconds). Entry deleted once track plays to end.
+  positions: {},
+  // user-set audio volume, 0..1
+  volume: 0.8,
 };
 let state = structuredClone(defaultState);
 
@@ -39,6 +43,8 @@ const userEl = $("user-name");
 const btnLogin = $("btn-login");
 const btnLogout = $("btn-logout");
 const btnPlay = $("btn-play");
+const btnPrev = $("btn-prev");
+const btnNext = $("btn-next");
 const btnRewind = $("btn-rewind");
 const btnForward = $("btn-forward");
 const playGlyph = $("play-glyph");
@@ -47,6 +53,7 @@ const scopeLabelEl = $("scope-label");
 const posCurrentEl = $("pos-current");
 const posDurationEl = $("pos-duration");
 const seekBar = $("seek-bar");
+const volumeBar = $("volume-bar");
 const folderListEl = $("folder-list");
 const loopSelect = $("loop-select");
 const logEl = $("log");
@@ -71,6 +78,20 @@ function loadState() {
     state = { ...defaultState, ...saved };
     if (!Array.isArray(state.browseStack) || state.browseStack.length === 0) {
       state.browseStack = [{ id: "root", name: "" }];
+    }
+    if (!state.positions || typeof state.positions !== "object") {
+      state.positions = {};
+    }
+    // migration: 旧的 state 只有 state.position,补一份到 map
+    if (
+      state.currentTrack &&
+      state.position > 0 &&
+      state.positions[state.currentTrack.id] == null
+    ) {
+      state.positions[state.currentTrack.id] = state.position;
+    }
+    if (typeof state.volume !== "number" || state.volume < 0 || state.volume > 1) {
+      state.volume = 0.8;
     }
   } catch (e) {
     log("loadState 失败:", e.message);
@@ -202,7 +223,7 @@ async function renderBrowser() {
       if (state.currentTrack && state.currentTrack.id === row.item.id) {
         li.classList.add("active");
       }
-      li.addEventListener("click", () => playTrack(row.item, 0));
+      li.addEventListener("click", () => playTrack(row.item));
     }
     folderListEl.appendChild(li);
   }
@@ -226,7 +247,17 @@ function setPlayGlyph() {
   playGlyph.textContent = audio.paused ? "▶" : "❚❚";
 }
 
-async function playTrack(driveItem, startAt = 0) {
+async function playTrack(driveItem, startAt = null) {
+  // startAt 语义:
+  //   null  → 自动从 per-track map 恢复(浏览器点击时用)
+  //   0     → 显式从头开始(folder loop 自动进下一首时用)
+  //   N>0   → 跳到 N(resume on open 时用)
+  if (startAt === null) {
+    startAt = state.positions[driveItem.id] ?? 0;
+  } else if (startAt === 0) {
+    delete state.positions[driveItem.id];
+  }
+
   log(`load: ${driveItem.name} @ ${startAt}s`);
   state.currentTrack = {
     id: driveItem.id,
@@ -328,6 +359,11 @@ async function advance(direction) {
 
 function handleEnded() {
   log(`ended; mode=${state.mode}`);
+  // 这首播完了,从 per-track map 移掉,下次再播这首从头开始
+  if (state.currentTrack) {
+    delete state.positions[state.currentTrack.id];
+    saveState();
+  }
   if (state.mode === "single") {
     audio.currentTime = 0;
     audio.play().catch((e) => log("repeat play 失败:", e.message));
@@ -366,9 +402,76 @@ seekBar.addEventListener("change", () => {
   const dur = audio.duration;
   if (isFinite(dur)) {
     audio.currentTime = (Number(seekBar.value) / 1000) * dur;
+    updateMediaSessionPosition();
   }
   seekDragging = false;
 });
+
+// === Media Session API ===
+// 让锁屏 / 系统媒体浮层 / 蓝牙耳机按键 / 方向盘控件能控制播放。
+// 仅在浏览器实现了 mediaSession 时才接,失败 setActionHandler 用 try 包好。
+function hasMediaSession() {
+  return "mediaSession" in navigator;
+}
+
+function updateMediaSessionMetadata() {
+  if (!hasMediaSession() || !state.currentTrack) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: state.currentTrack.name,
+    artist: "Background Radio",
+    album: currentBrowsePath() || "/",
+  });
+}
+
+function setMSHandler(action, handler) {
+  try {
+    navigator.mediaSession.setActionHandler(action, handler);
+  } catch (_) {
+    // 某些浏览器不支持某些 action,忽略
+  }
+}
+
+function updateMediaSessionHandlers() {
+  if (!hasMediaSession()) return;
+  setMSHandler("play", () => audio.play().catch(() => {}));
+  setMSHandler("pause", () => audio.pause());
+  setMSHandler("seekbackward", (e) => {
+    audio.currentTime = Math.max(0, audio.currentTime - (e.seekOffset || REWIND_SECS));
+    updateMediaSessionPosition();
+  });
+  setMSHandler("seekforward", (e) => {
+    const target = audio.currentTime + (e.seekOffset || FORWARD_SECS);
+    audio.currentTime = isFinite(audio.duration)
+      ? Math.min(audio.duration, target)
+      : target;
+    updateMediaSessionPosition();
+  });
+  setMSHandler("seekto", (e) => {
+    if (e.seekTime != null) {
+      audio.currentTime = e.seekTime;
+      updateMediaSessionPosition();
+    }
+  });
+  // 单曲循环时锁屏按 prev/next 也不该跳曲
+  const nav = state.mode === "single" ? null : (dir) => advance(dir);
+  setMSHandler("previoustrack", nav ? () => nav("prev") : null);
+  setMSHandler("nexttrack", nav ? () => nav("next") : null);
+}
+
+function updateMediaSessionPosition() {
+  if (!hasMediaSession()) return;
+  const dur = audio.duration;
+  if (!isFinite(dur) || dur <= 0) return;
+  try {
+    navigator.mediaSession.setPositionState({
+      duration: dur,
+      position: Math.min(audio.currentTime, dur),
+      playbackRate: audio.playbackRate || 1,
+    });
+  } catch (_) {
+    // 某些版本对参数挑剔,忽略
+  }
+}
 
 // === Audio events ===
 audio.addEventListener("loadedmetadata", () => {
@@ -377,10 +480,20 @@ audio.addEventListener("loadedmetadata", () => {
     restorePositionOnLoadedMetadata = 0;
   }
   updateSeekDisplay();
+  updateMediaSessionMetadata();
+  updateMediaSessionHandlers();
+  updateMediaSessionPosition();
 });
 audio.addEventListener("timeupdate", updateSeekDisplay);
-audio.addEventListener("play", setPlayGlyph);
-audio.addEventListener("pause", setPlayGlyph);
+audio.addEventListener("play", () => {
+  setPlayGlyph();
+  if (hasMediaSession()) navigator.mediaSession.playbackState = "playing";
+  updateMediaSessionPosition();
+});
+audio.addEventListener("pause", () => {
+  setPlayGlyph();
+  if (hasMediaSession()) navigator.mediaSession.playbackState = "paused";
+});
 audio.addEventListener("ended", handleEnded);
 audio.addEventListener("error", () => {
   const code = audio.error?.code;
@@ -389,19 +502,23 @@ audio.addEventListener("error", () => {
   refetchDownloadUrlAndResume();
 });
 
-// === Periodic position persistence ===
+function persistPosition() {
+  if (!state.currentTrack) return;
+  state.position = audio.currentTime;
+  state.positions[state.currentTrack.id] = audio.currentTime;
+  saveState();
+}
+
 setInterval(() => {
   if (!state.currentTrack || audio.paused) return;
-  state.position = audio.currentTime;
-  saveState();
+  persistPosition();
 }, POSITION_SAVE_INTERVAL_MS);
 
 window.addEventListener("beforeunload", () => {
-  if (state.currentTrack) {
-    state.position = audio.currentTime;
-    saveState();
-  }
+  if (state.currentTrack) persistPosition();
 });
+
+audio.addEventListener("pause", persistPosition);
 
 // === Controls wiring ===
 btnPlay.addEventListener("click", async () => {
@@ -412,7 +529,17 @@ btnPlay.addEventListener("click", async () => {
       try {
         const fresh = await fetchItem(state.currentTrack.id);
         audio.src = fresh["@microsoft.graph.downloadUrl"];
-        restorePositionOnLoadedMetadata = state.position || 0;
+        restorePositionOnLoadedMetadata =
+          state.positions[state.currentTrack.id] ?? state.position ?? 0;
+        // 同时刷新一下 trackFolderItems,否则锁屏按 next 没目标
+        if (state.currentTrack.parentFolderId) {
+          try {
+            const siblings = await listFolder(state.currentTrack.parentFolderId);
+            trackFolderItems = siblings.filter(isAudio);
+          } catch (e) {
+            log("加载同级文件失败:", e.message);
+          }
+        }
       } catch (e) {
         log("无法获取 downloadUrl:", e.message);
         return;
@@ -427,6 +554,7 @@ btnPlay.addEventListener("click", async () => {
 btnRewind.addEventListener("click", () => {
   if (!audio.src) return;
   audio.currentTime = Math.max(0, audio.currentTime - REWIND_SECS);
+  updateMediaSessionPosition();
 });
 
 btnForward.addEventListener("click", () => {
@@ -434,13 +562,39 @@ btnForward.addEventListener("click", () => {
   const dur = audio.duration;
   const target = audio.currentTime + FORWARD_SECS;
   audio.currentTime = isFinite(dur) ? Math.min(dur, target) : target;
+  updateMediaSessionPosition();
 });
+
+btnPrev.addEventListener("click", () => advance("prev"));
+btnNext.addEventListener("click", () => advance("next"));
+
+function applyModeUi() {
+  loopSelect.value = state.mode;
+  // single 循环时藏掉 prev/next(proposal:"上一首/下一首 folder loop 时才有")
+  btnPrev.hidden = state.mode === "single";
+  btnNext.hidden = state.mode === "single";
+  // Media Session 也得跟着改,否则锁屏按钮失效
+  updateMediaSessionHandlers();
+}
 
 loopSelect.addEventListener("change", () => {
   state.mode = loopSelect.value;
   saveState();
+  applyModeUi();
   log(`loop mode → ${state.mode}`);
 });
+
+// === Volume ===
+function applyVolume() {
+  audio.volume = state.volume;
+  volumeBar.value = String(Math.round(state.volume * 100));
+}
+
+volumeBar.addEventListener("input", () => {
+  state.volume = Number(volumeBar.value) / 100;
+  audio.volume = state.volume;
+});
+volumeBar.addEventListener("change", saveState);
 
 // === Auth controls ===
 btnLogin.addEventListener("click", async () => {
@@ -474,7 +628,8 @@ async function restoreSession() {
 
 async function main() {
   loadState();
-  loopSelect.value = state.mode;
+  applyModeUi();
+  applyVolume();
 
   log("加载 MSAL...");
   let result;
