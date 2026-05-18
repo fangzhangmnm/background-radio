@@ -455,7 +455,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   position: fixed;
   inset: 0;
   z-index: 70;
-  background: rgba(20, 16, 10, 0.32);
+  background: rgba(0, 0, 0, 0.50);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.22s ease-out;
@@ -634,7 +634,10 @@ button.ghost:hover:not(:disabled) { background: var(--hover); }
   text-align: center;
   cursor: pointer;
   user-select: none;
-  background: rgba(18, 17, 16, 0.86);
+  /* 不透明实色,沿用当前主题:Day 用白底,Night 用黑底。
+     之前 86% 透明让下面的封面图(可能带绿)漏出来,被你抓到了 */
+  background: var(--bg-surface);
+  color: var(--fg);
   animation: tap-fade-in 0.4s ease-out;
 }
 .tap-overlay[hidden] { display: none; }
