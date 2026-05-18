@@ -744,6 +744,19 @@ button.ghost:hover:not(:disabled) { background: var(--hover); }
   color: var(--accent);
   animation: tap-pulse 2.4s ease-in-out infinite;
 }
+
+/* loading 态:audio.src 还没装,点了没用,视觉上夯实"还没准备好" */
+.tap-overlay.loading {
+  cursor: wait;
+}
+.tap-overlay.loading .tap-glyph {
+  color: var(--fg-soft);
+  opacity: 0.45;
+  animation: none;
+}
+.tap-overlay.loading .tap-title {
+  opacity: 0.6;
+}
 .tap-title {
   font-size: 1.25rem;
   font-weight: 400;

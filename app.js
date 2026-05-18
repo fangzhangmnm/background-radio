@@ -1250,6 +1250,7 @@ btnCacheClear.addEventListener("click", async () => {
 // === Init ===
 const tapOverlay = $("tap-overlay");
 const tapTitleEl = $("tap-title");
+const tapHintEl = $("tap-hint");
 
 function showTapOverlay(title) {
   tapTitleEl.textContent = title;
@@ -1258,19 +1259,22 @@ function showTapOverlay(title) {
 function hideTapOverlay() {
   tapOverlay.hidden = true;
 }
+// audio.src 装好后调一下:摘掉 loading 视觉 + 提示文字换成可点状态
+function markOverlayReady() {
+  tapOverlay.classList.remove("loading");
+  if (tapHintEl) tapHintEl.textContent = "轻触屏幕继续";
+}
 
 // 注意:audio.play() 必须在用户 gesture 同步路径里调,所以不要在 await 后头调
 tapOverlay.addEventListener("click", () => {
-  if (!audio.src) {
-    // 页面刚加载完,init/auth/restoreSession 还没把 audio.src 装好。
-    // 不藏 overlay,让用户晚点再点(或者 restoreSession 完了自动 autoplay 成功就藏)
+  if (tapOverlay.classList.contains("loading") || !audio.src) {
+    // 还没装载 → cursor 也是 wait,视觉上已经在说"还没好",这里加个 log 兜底
     log("audio 还没装载,稍等再点");
     return;
   }
   hideTapOverlay();
   audio.play().catch((e) => {
     log("点 overlay 后 play 仍失败:", e.message);
-    // 再 show 回来,避免锁死
     tapOverlay.hidden = false;
   });
 });
@@ -1288,6 +1292,7 @@ async function restoreSession() {
     currentBlobUrl = URL.createObjectURL(blob);
     audio.src = currentBlobUrl;
     currentSrcKind = "blob";
+    markOverlayReady();
     restorePositionOnLoadedMetadata =
       state.positions[state.currentTrack.id] ?? state.position ?? 0;
     cache.touch(state.currentTrack.id).catch(() => {});
@@ -1314,6 +1319,7 @@ async function restoreSession() {
       const fresh = await fetchItem(state.currentTrack.id);
       audio.src = fresh["@microsoft.graph.downloadUrl"];
       currentSrcKind = "downloadUrl";
+      markOverlayReady();
       restorePositionOnLoadedMetadata =
         state.positions[state.currentTrack.id] ?? state.position ?? 0;
       if (state.currentTrack.parentFolderId) {
