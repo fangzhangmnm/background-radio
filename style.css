@@ -1,20 +1,19 @@
-/* === 白金 = 白面 + 古董金边/字/icon。无金色高饱和,所有金都偏哑光老黄铜 === */
+/* === 温暖白金 day mode:白面 + 哑光老黄铜。深一点更"金",但不饱和 === */
 :root {
   --font: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
 
-  /* light: 白面 + 古董金 */
-  --bg-1: #f1ebdc;             /* 白面:暖奶油近白 */
-  --bg-2: #e2d6b5;             /* 略深底,给磨砂面 blur 材料 */
-  --bg-tint: #d4c39b;
-  --fg: #2f281c;               /* 字色偏暖深棕(不是纯灰) */
-  --fg-soft: #816d4a;           /* 副字色 = 老黄铜灰 */
-  --hairline: rgba(155, 125, 65, 0.20);  /* 边线 = 金色低透明 */
-  --hover: rgba(255, 250, 230, 0.42);
-  --active: rgba(155, 125, 65, 0.10);
-  --accent: #9a7d44;            /* 古董金:深、哑光、不张扬 */
-  --accent-soft: #b89a5e;
-  --glass: rgba(255, 250, 235, 0.40);
-  --glass-strong: rgba(255, 250, 235, 0.62);
+  --bg-1: #ece0c2;              /* 白面:暖奶油偏 champagne */
+  --bg-2: #ddc99e;
+  --bg-tint: #c8b478;
+  --fg: #2a2113;                /* 字色暖深棕 */
+  --fg-soft: #7d6437;            /* 副字色 = 老黄铜 */
+  --hairline: rgba(135, 100, 40, 0.28);
+  --hover: rgba(255, 248, 220, 0.40);
+  --active: rgba(135, 100, 40, 0.14);
+  --accent: #946824;             /* 主金:深、哑光老黄铜 */
+  --accent-soft: #b58a44;
+  --glass: rgba(255, 246, 218, 0.40);
+  --glass-strong: rgba(255, 246, 218, 0.62);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -303,111 +302,92 @@ main {
   cursor: pointer;
 }
 
-/* === Controls — flex 行,3 列 + 右侧音量条 === */
+/* === Controls — Win8 tile,4 列(left col / play / right col / vol),无圆角无 padding === */
+/* gap=1px + 容器 bg=hairline 让 1px 缝充当 cell 分隔线 */
 .controls {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 1rem 1rem 1.1rem;
+  display: grid;
+  grid-template-columns: 1fr 1.8fr 1fr auto;
+  gap: 1px;
+  height: 9rem;
+  background: var(--hairline);
   border-top: 1px solid var(--hairline);
   flex-shrink: 0;
 }
 
 .ctrl-col {
-  flex: 1 1 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  min-width: 0;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--hairline);
 }
 
-button.ctrl-side,
-button.ctrl-mini,
-button.ctrl-play {
+button.ctrl-cell,
+button.ctrl-play-big {
   font-family: inherit;
   font-weight: 300;
   background: var(--glass-strong);
-  border: 1px solid var(--hairline);
+  border: none;
+  border-radius: 0;
+  padding: 0;
   color: var(--accent);
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  transition: background 0.12s ease, border-color 0.12s ease;
-  padding: 0;
+  gap: 0.18rem;
+  transition: background 0.12s ease;
 }
-button.ctrl-side:hover:not(:disabled),
-button.ctrl-mini:hover:not(:disabled),
-button.ctrl-play:hover:not(:disabled) {
+
+button.ctrl-cell:hover:not(:disabled),
+button.ctrl-play-big:hover:not(:disabled) {
   background: var(--hover);
-  border-color: var(--accent);
 }
-button.ctrl-side:active:not(:disabled),
-button.ctrl-mini:active:not(:disabled),
-button.ctrl-play:active:not(:disabled) {
+button.ctrl-cell:active:not(:disabled),
+button.ctrl-play-big:active:not(:disabled) {
   background: var(--active);
 }
+button:disabled { opacity: 0.35; cursor: not-allowed; }
 
-.ctrl-side {
-  height: 3.6rem;
-  border-radius: 8px;
-  gap: 0.15rem;
-  padding: 0.3rem 0.5rem;
+.ctrl-cell svg {
+  width: 1.9rem;
+  height: 1.9rem;
 }
 
-.ctrl-mini {
-  height: 2.5rem;
-  border-radius: 8px;
+/* PLAY 是中间巨大 cell:同样 flat 矩形,SVG 巨大 */
+.ctrl-play-big svg {
+  width: 4.8rem;
+  height: 4.8rem;
 }
 
-.ctrl-mini svg {
-  width: 1.4rem;
-  height: 1.4rem;
-}
-
-.ctrl-play {
-  flex: 0 0 auto;
-  width: 6rem;
-  height: 6rem;
-  border-radius: 50%;
-  border-color: var(--accent);
-  border-width: 1.5px;
-  align-self: center;
-}
-
-.ctrl-play svg {
-  width: 2.2rem;
-  height: 2.2rem;
-}
-
-.ctrl-play .glyph-pause { display: none; }
-.ctrl-play.paused .glyph-play { display: block; }
-.ctrl-play.paused .glyph-pause { display: none; }
-.ctrl-play:not(.paused) .glyph-play { display: none; }
-.ctrl-play:not(.paused) .glyph-pause { display: block; }
+.ctrl-play-big .glyph-pause { display: none; }
+.ctrl-play-big.paused .glyph-play { display: block; }
+.ctrl-play-big.paused .glyph-pause { display: none; }
+.ctrl-play-big:not(.paused) .glyph-play { display: none; }
+.ctrl-play-big:not(.paused) .glyph-pause { display: block; }
 
 .ctrl-glyph {
-  font-size: 1.45rem;
+  font-size: 1.95rem;
   line-height: 1;
   font-weight: 300;
   color: var(--accent);
 }
 
 .ctrl-sub {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   color: var(--fg-soft);
   letter-spacing: 0.06em;
 }
 
-/* === 右侧垂直音量条 === */
+/* === 右侧垂直音量条(本身也是一个 cell)=== */
 .vol-strip {
+  background: var(--glass-strong);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.3rem 0;
-  width: 1.8rem;
+  padding: 0.4rem 0.3rem;
+  width: 2.2rem;
 }
 
 .vol-icon {
