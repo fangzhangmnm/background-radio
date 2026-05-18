@@ -33,6 +33,8 @@ const defaultState = {
   everPlayed: {},
   // "auto" | "day" | "night"。inline script 在 CSS 应用前就读出来设了 data-theme
   theme: "auto",
+  // 缓存上限(MB)。cache.js 默认 250,这里持久化用户的覆盖值
+  cacheCapMB: 250,
 };
 let state = structuredClone(defaultState);
 
@@ -40,6 +42,7 @@ let state = structuredClone(defaultState);
 let currentFolderItems = [];   // raw driveItems for browse folder (used by UI)
 let trackFolderItems = null;   // raw audio driveItems for current track's parent (used for advance)
 let restorePositionOnLoadedMetadata = 0;
+let offlineMode = false;       // true:MSAL/Graph 不可用,只走 IDB 缓存
 
 // === DOM ===
 const $ = (id) => document.getElementById(id);
@@ -65,6 +68,7 @@ const menuDrawer = $("menu-drawer");
 const menuBackdrop = $("menu-backdrop");
 const cacheInfoEl = $("cache-info");
 const btnCacheClear = $("btn-cache-clear");
+const cacheCapInput = $("cache-cap-input");
 const loopRadios = document.querySelectorAll('input[name="loop"]');
 const themeRadios = document.querySelectorAll('input[name="theme"]');
 const logEl = $("log");
@@ -125,6 +129,10 @@ function loadState() {
     if (state.theme !== "day" && state.theme !== "night" && state.theme !== "auto") {
       state.theme = "auto";
     }
+    if (typeof state.cacheCapMB !== "number" || state.cacheCapMB < 50) {
+      state.cacheCapMB = 250;
+    }
+    cache.setCapMB(state.cacheCapMB);
   } catch (e) {
     log("loadState 失败:", e.message);
   }
@@ -229,7 +237,25 @@ function currentBrowsePath() {
 }
 
 // === Browser rendering ===
+function pinStateOf(trackId, cacheStatusMap, pinnedStatusMap) {
+  if (!cacheStatusMap.get(trackId)) return "empty";
+  return pinnedStatusMap.get(trackId) ? "pinned" : "cached";
+}
+
+function pinIconHtml(state) {
+  const titles = {
+    empty: "点击下载并锁定离线",
+    cached: "已缓存(点击锁定为不可淘汰)",
+    pinned: "已锁定(点击解锁)",
+  };
+  return `<button class="pin-btn" data-pin-state="${state}" aria-label="${titles[state]}" title="${titles[state]}"></button>`;
+}
+
 async function renderBrowser() {
+  // 三种情形:offline / 未登录 / 在线
+  if (offlineMode) {
+    return renderBrowserFromCache();
+  }
   if (!isSignedIn()) {
     folderListEl.innerHTML = '<li class="entry empty">未登录</li>';
     return;
@@ -238,9 +264,10 @@ async function renderBrowser() {
   try {
     currentFolderItems = await listFolder(currentBrowseFolderId());
   } catch (e) {
-    log("列目录失败:", e.message);
-    folderListEl.innerHTML = `<li class="entry empty">列目录失败: ${escapeHtml(e.message)}</li>`;
-    return;
+    log("列目录失败,fallback 到本地缓存:", e.message);
+    offlineMode = true;
+    document.body.classList.add("offline");
+    return renderBrowserFromCache();
   }
 
   const rows = [];
@@ -259,14 +286,18 @@ async function renderBrowser() {
     return;
   }
 
-  // 一次性查所有 audio 文件的 cache 状态(并发)
+  // 并发查所有 audio 的 cache + pinned 状态
   const cacheStatus = new Map();
+  const pinnedStatus = new Map();
   await Promise.all(
     audios.map(async (a) => {
       try {
-        cacheStatus.set(a.id, await cache.isCached(a.id));
+        const m = await cache.getMeta(a.id);
+        cacheStatus.set(a.id, !!m);
+        pinnedStatus.set(a.id, !!(m && m.pinned));
       } catch (_) {
         cacheStatus.set(a.id, false);
+        pinnedStatus.set(a.id, false);
       }
     })
   );
@@ -287,20 +318,83 @@ async function renderBrowser() {
         row.item.audio?.duration != null
           ? formatTime(row.item.audio.duration / 1000)
           : "";
-      const isHit = cacheStatus.get(row.item.id);
+      const ps = pinStateOf(row.item.id, cacheStatus, pinnedStatus);
       li.dataset.trackId = row.item.id;
       li.innerHTML =
         `<span class="icon">♪</span>` +
         `<span class="name">${escapeHtml(displayName(row.item.name))}</span>` +
         (dur ? `<span class="meta">${dur}</span>` : "") +
-        `<span class="cache-dot" title="${isHit ? '已缓存,长按删除' : ''}"></span>`;
-      if (isHit) li.classList.add("cached");
+        pinIconHtml(ps);
+      if (ps !== "empty") li.classList.add("cached");
+      if (ps === "pinned") li.classList.add("pinned");
       if (state.currentTrack && state.currentTrack.id === row.item.id) {
         li.classList.add("active");
       }
+      const pinBtn = li.querySelector(".pin-btn");
+      pinBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        handlePinClick(row.item, li);
+      });
       li.addEventListener("click", () => playTrack(row.item));
       attachLongPress(li, () => handleLongPressDelete(row.item, li));
     }
+    folderListEl.appendChild(li);
+  }
+}
+
+// 离线模式:从 cache.meta 派生一个 flat list,只显示已缓存的曲
+async function renderBrowserFromCache() {
+  folderListEl.innerHTML = '<li class="entry empty">加载本地缓存…</li>';
+  let all;
+  try {
+    all = await cache.listAllMeta();
+  } catch (e) {
+    folderListEl.innerHTML = `<li class="entry empty">读缓存失败: ${escapeHtml(e.message)}</li>`;
+    return;
+  }
+  if (all.length === 0) {
+    folderListEl.innerHTML = '<li class="entry empty">离线模式 · 无缓存可放</li>';
+    return;
+  }
+  all.sort((a, b) =>
+    (a.parentFolderName || "").localeCompare(b.parentFolderName || "") ||
+    (a.name || "").localeCompare(b.name || "")
+  );
+
+  folderListEl.innerHTML = "";
+  for (const m of all) {
+    const li = document.createElement("li");
+    li.className = "entry cached" + (m.pinned ? " pinned" : "");
+    li.dataset.trackId = m.trackId;
+    const dur = m.duration != null ? formatTime(m.duration) : "";
+    const folderTag = m.parentFolderName
+      ? `<span class="meta">${escapeHtml(m.parentFolderName)}</span>`
+      : "";
+    const ps = m.pinned ? "pinned" : "cached";
+    li.innerHTML =
+      `<span class="icon">♪</span>` +
+      `<span class="name">${escapeHtml(displayName(m.name || m.trackId))}</span>` +
+      (dur ? `<span class="meta">${dur}</span>` : "") +
+      folderTag +
+      pinIconHtml(ps);
+    if (state.currentTrack && state.currentTrack.id === m.trackId) {
+      li.classList.add("active");
+    }
+    // 构造 driveItem-like,playTrack 会先查 cache.getBlob,命中即播
+    const fakeItem = {
+      id: m.trackId,
+      name: m.name || m.trackId,
+      parentReference: m.parentFolderId
+        ? { id: m.parentFolderId, name: m.parentFolderName }
+        : null,
+    };
+    const pinBtn = li.querySelector(".pin-btn");
+    pinBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      handlePinClick(fakeItem, li);
+    });
+    li.addEventListener("click", () => playTrack(fakeItem));
+    attachLongPress(li, () => handleLongPressDelete(fakeItem, li));
     folderListEl.appendChild(li);
   }
 }
@@ -336,9 +430,20 @@ function clearBlobUrl() {
 }
 
 // 后台 fetch 整首入库 —— 不阻塞调用方
-async function backgroundCacheTrack(driveItem) {
+// 返回 true / false 让调用方知道有没有成功(让 pin 流程能根据结果决定是否 setPinned)
+async function backgroundCacheTrack(driveItem, options = {}) {
+  if (offlineMode) {
+    log("offline: 跳过 background cache");
+    return false;
+  }
   try {
-    if (await cache.isCached(driveItem.id)) return;
+    if (await cache.isCached(driveItem.id)) {
+      if (options.pinAfter) {
+        await cache.setPinned(driveItem.id, true);
+        refreshCachedMarkers().catch(() => {});
+      }
+      return true;
+    }
     log(`后台缓存: ${driveItem.name}`);
     // downloadUrl 可能过期(列目录到现在 >1h),refetch 一次保证新鲜
     let dl = driveItem["@microsoft.graph.downloadUrl"];
@@ -350,18 +455,26 @@ async function backgroundCacheTrack(driveItem) {
     const resp = await fetch(dl);
     if (!resp.ok) throw new Error(`fetch ${resp.status}`);
     const blob = await resp.blob();
-    await cache.set(driveItem.id, blob, {
+    const ok = await cache.set(driveItem.id, blob, {
       name: driveItem.name,
       duration: driveItem.audio?.duration
         ? driveItem.audio.duration / 1000
         : null,
+      parentFolderId: driveItem.parentReference?.id ?? null,
+      parentFolderName: driveItem.parentReference?.name ?? null,
+      pinned: !!options.pinAfter,
     });
-    log(`已缓存: ${driveItem.name} ${cache.formatBytes(blob.size)}`);
-    // 刷新 UI 标记 + 菜单里的统计
+    if (!ok) {
+      log(`未缓存(容量塞不下): ${driveItem.name} ${cache.formatBytes(blob.size)}`);
+      return false;
+    }
+    log(`已缓存: ${driveItem.name} ${cache.formatBytes(blob.size)}${options.pinAfter ? " · pinned" : ""}`);
     refreshCachedMarkers().catch(() => {});
     refreshCacheInfo().catch(() => {});
+    return true;
   } catch (e) {
     log(`后台缓存失败 ${driveItem.name}:`, e.message);
+    return false;
   }
 }
 
@@ -405,13 +518,30 @@ async function playTrack(driveItem, startAt = null) {
   if (li) li.classList.add("active");
 
   // Refresh track-folder listing for advance logic
+  // Online:从 Graph 拿;offline:从 cache.meta 派生同 parent 的曲
   if (state.currentTrack.parentFolderId) {
-    try {
-      const siblings = await listFolder(state.currentTrack.parentFolderId);
-      trackFolderItems = siblings.filter(isAudio);
-    } catch (e) {
-      log("加载同级文件失败:", e.message);
-      trackFolderItems = null;
+    if (offlineMode) {
+      try {
+        const allMeta = await cache.listAllMeta();
+        trackFolderItems = allMeta
+          .filter((m) => m.parentFolderId === state.currentTrack.parentFolderId)
+          .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+          .map((m) => ({
+            id: m.trackId,
+            name: m.name,
+            parentReference: { id: m.parentFolderId, name: m.parentFolderName },
+          }));
+      } catch (_) {
+        trackFolderItems = null;
+      }
+    } else {
+      try {
+        const siblings = await listFolder(state.currentTrack.parentFolderId);
+        trackFolderItems = siblings.filter(isAudio);
+      } catch (e) {
+        log("加载同级文件失败:", e.message);
+        trackFolderItems = null;
+      }
     }
   }
 
@@ -419,7 +549,7 @@ async function playTrack(driveItem, startAt = null) {
   clearBlobUrl();
   prefetchTriggered = false;
 
-  // 先查 cache。命中 → blob URL;未命中 → downloadUrl
+  // 先查 cache。命中 → blob URL;未命中 → 在线 fallback 到 downloadUrl,离线放弃
   let cachedBlob = null;
   try {
     cachedBlob = await cache.getBlob(driveItem.id);
@@ -433,6 +563,9 @@ async function playTrack(driveItem, startAt = null) {
     currentSrcKind = "blob";
     log(`cache 命中: ${driveItem.name}`);
     cache.touch(driveItem.id).catch(() => {});
+  } else if (offlineMode) {
+    log(`offline 且无缓存:${driveItem.name} 无法播`);
+    return;
   } else {
     const dl = driveItem["@microsoft.graph.downloadUrl"];
     if (!dl) {
@@ -460,8 +593,8 @@ async function playTrack(driveItem, startAt = null) {
   state.everPlayed[driveItem.id] = true;
   saveState();
 
-  // 封面图作 listview 淡背景(异步,不阻塞)
-  applyCoverBackground(driveItem).catch(() => {});
+  // 封面图作 listview 淡背景(异步,不阻塞,offline 跳过)
+  if (!offlineMode) applyCoverBackground(driveItem).catch(() => {});
 
   restorePositionOnLoadedMetadata = startAt;
 
@@ -518,10 +651,44 @@ async function refreshCachedMarkers() {
   const lis = folderListEl.querySelectorAll(".entry[data-track-id]");
   for (const li of lis) {
     const id = li.dataset.trackId;
-    const hit = await cache.isCached(id);
-    li.classList.toggle("cached", hit);
-    const dot = li.querySelector(".cache-dot");
-    if (dot) dot.title = hit ? "已缓存,长按删除" : "";
+    const m = await cache.getMeta(id);
+    const cached = !!m;
+    const pinned = !!(m && m.pinned);
+    li.classList.toggle("cached", cached);
+    li.classList.toggle("pinned", pinned);
+    const btn = li.querySelector(".pin-btn");
+    if (btn) {
+      const ps = !cached ? "empty" : pinned ? "pinned" : "cached";
+      btn.dataset.pinState = ps;
+    }
+  }
+}
+
+// 点 pin icon:在 empty → caching/pinned → unpin → cached 之间循环
+async function handlePinClick(driveItem, li) {
+  const m = await cache.getMeta(driveItem.id);
+  if (!m) {
+    // empty → 触发下载 + pin。需要网络
+    if (offlineMode) {
+      log("offline 不能 pin 未缓存的曲");
+      return;
+    }
+    const btn = li.querySelector(".pin-btn");
+    if (btn) btn.dataset.pinState = "loading";
+    const ok = await backgroundCacheTrack(driveItem, { pinAfter: true });
+    if (!ok && btn) btn.dataset.pinState = "empty";
+  } else if (!m.pinned) {
+    // cached → pinned
+    await cache.setPinned(driveItem.id, true);
+    log(`pin: ${driveItem.name}`);
+    refreshCachedMarkers().catch(() => {});
+    refreshCacheInfo().catch(() => {});
+  } else {
+    // pinned → unpinned (仍 cached)
+    await cache.setPinned(driveItem.id, false);
+    log(`unpin: ${driveItem.name}`);
+    refreshCachedMarkers().catch(() => {});
+    refreshCacheInfo().catch(() => {});
   }
 }
 
@@ -530,10 +697,12 @@ async function handleLongPressDelete(driveItem, li) {
   const ok = confirm(`从本地缓存删除「${driveItem.name}」?\n(不影响 OneDrive)`);
   if (!ok) return;
   try {
-    // 如果正在播这首 + 当前 src 是 blob,要先恢复 downloadUrl 不然丢了 blob 没东西播
+    // 如果正在播这首 + 当前 src 是 blob:online 切回 downloadUrl 不掉链子;
+    // offline 没救,但 audio element 已经载入了 blob 数据可以继续放完,只是不能重启
     if (
       state.currentTrack?.id === driveItem.id &&
-      currentSrcKind === "blob"
+      currentSrcKind === "blob" &&
+      !offlineMode
     ) {
       log("正在播这首,切回 downloadUrl 再删 cache");
       const wasPosition = audio.currentTime;
@@ -547,6 +716,10 @@ async function handleLongPressDelete(driveItem, li) {
     }
     await cache.del(driveItem.id);
     li.classList.remove("cached");
+    li.classList.remove("pinned");
+    const btn = li.querySelector(".pin-btn");
+    if (btn) btn.dataset.pinState = "empty";
+    refreshCacheInfo().catch(() => {});
     log(`已从缓存删除: ${driveItem.name}`);
   } catch (e) {
     log("删除失败:", e.message);
@@ -787,24 +960,37 @@ btnPlay.addEventListener("click", async () => {
   if (!state.currentTrack) return;
   if (audio.paused) {
     if (!audio.src) {
-      // resume after reload: rebuild src from currentTrack
-      try {
-        const fresh = await fetchItem(state.currentTrack.id);
-        audio.src = fresh["@microsoft.graph.downloadUrl"];
+      // resume after reload: 先试 cache,失败再上 downloadUrl,offline 只走 cache
+      const blob = await cache.getBlob(state.currentTrack.id).catch(() => null);
+      if (blob) {
+        currentBlobUrl = URL.createObjectURL(blob);
+        audio.src = currentBlobUrl;
+        currentSrcKind = "blob";
         restorePositionOnLoadedMetadata =
           state.positions[state.currentTrack.id] ?? state.position ?? 0;
-        // 同时刷新一下 trackFolderItems,否则锁屏按 next 没目标
-        if (state.currentTrack.parentFolderId) {
-          try {
-            const siblings = await listFolder(state.currentTrack.parentFolderId);
-            trackFolderItems = siblings.filter(isAudio);
-          } catch (e) {
-            log("加载同级文件失败:", e.message);
-          }
-        }
-      } catch (e) {
-        log("无法获取 downloadUrl:", e.message);
+        cache.touch(state.currentTrack.id).catch(() => {});
+      } else if (offlineMode) {
+        log("offline 且当前曲无缓存,无法 resume");
         return;
+      } else {
+        try {
+          const fresh = await fetchItem(state.currentTrack.id);
+          audio.src = fresh["@microsoft.graph.downloadUrl"];
+          currentSrcKind = "downloadUrl";
+          restorePositionOnLoadedMetadata =
+            state.positions[state.currentTrack.id] ?? state.position ?? 0;
+          if (state.currentTrack.parentFolderId) {
+            try {
+              const siblings = await listFolder(state.currentTrack.parentFolderId);
+              trackFolderItems = siblings.filter(isAudio);
+            } catch (e) {
+              log("加载同级文件失败:", e.message);
+            }
+          }
+        } catch (e) {
+          log("无法获取 downloadUrl:", e.message);
+          return;
+        }
       }
     }
     audio.play().catch((e) => log("play 失败:", e.message));
@@ -917,11 +1103,32 @@ menuBackdrop.addEventListener("click", closeMenu);
 async function refreshCacheInfo() {
   try {
     const s = await cache.stats();
-    cacheInfoEl.textContent = `${s.count} 首 · ${cache.formatBytes(s.totalBytes)} / ${cache.formatBytes(s.capBytes)}`;
+    const pinnedHint = s.pinnedCount ? ` · ${s.pinnedCount} pinned` : "";
+    cacheInfoEl.textContent =
+      `${s.count} 首 · ${cache.formatBytes(s.totalBytes)} / ${cache.formatBytes(s.capBytes)}${pinnedHint}`;
   } catch (e) {
     cacheInfoEl.textContent = "无法读取";
   }
+  if (cacheCapInput && document.activeElement !== cacheCapInput) {
+    cacheCapInput.value = String(state.cacheCapMB);
+  }
 }
+
+// 缓存上限输入(MB)。回车或失焦保存,validate 50–8192
+cacheCapInput?.addEventListener("change", () => {
+  const v = parseInt(cacheCapInput.value, 10);
+  if (!isFinite(v) || v < 50) {
+    cacheCapInput.value = String(state.cacheCapMB);
+    return;
+  }
+  const clamped = Math.min(Math.max(v, 50), 8192);
+  state.cacheCapMB = clamped;
+  cache.setCapMB(clamped);
+  saveState();
+  cacheCapInput.value = String(clamped);
+  log(`缓存上限 → ${clamped} MB`);
+  refreshCacheInfo().catch(() => {});
+});
 
 btnCacheClear.addEventListener("click", async () => {
   const s = await cache.stats();
@@ -930,8 +1137,8 @@ btnCacheClear.addEventListener("click", async () => {
     return;
   }
   if (!confirm(`清除全部本地缓存(${s.count} 首,${cache.formatBytes(s.totalBytes)})?\n不影响 OneDrive。`)) return;
-  // 正在播的如果是 blob,先切回 downloadUrl
-  if (currentSrcKind === "blob" && state.currentTrack) {
+  // 正在播的如果是 blob,online 切回 downloadUrl,offline 让 audio 用已载入数据继续放完
+  if (currentSrcKind === "blob" && state.currentTrack && !offlineMode) {
     try {
       const wasPosition = audio.currentTime;
       const wasPlaying = !audio.paused;
@@ -979,23 +1186,51 @@ async function restoreSession() {
   posCurrentEl.textContent = formatTime(state.position);
   log("恢复:", state.currentTrack.name, "@", formatTime(state.position));
 
-  // 预拉 downloadUrl 和同级列表,这样后续无论是 autoplay 还是 tap overlay,play() 都能直接成
-  try {
-    const fresh = await fetchItem(state.currentTrack.id);
-    audio.src = fresh["@microsoft.graph.downloadUrl"];
+  // 先查 cache。命中 → blob URL,立刻可以播;不命中 + online → 拉 downloadUrl;不命中 + offline → 放弃
+  const blob = await cache.getBlob(state.currentTrack.id).catch(() => null);
+  if (blob) {
+    currentBlobUrl = URL.createObjectURL(blob);
+    audio.src = currentBlobUrl;
+    currentSrcKind = "blob";
     restorePositionOnLoadedMetadata =
       state.positions[state.currentTrack.id] ?? state.position ?? 0;
+    cache.touch(state.currentTrack.id).catch(() => {});
+    // siblings 取自 cache(offline 或在线都先这样,够 prev/next 用)
     if (state.currentTrack.parentFolderId) {
       try {
-        const siblings = await listFolder(state.currentTrack.parentFolderId);
-        trackFolderItems = siblings.filter(isAudio);
-      } catch (e) {
-        log("加载同级文件失败:", e.message);
-      }
+        const allMeta = await cache.listAllMeta();
+        trackFolderItems = allMeta
+          .filter((m) => m.parentFolderId === state.currentTrack.parentFolderId)
+          .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+          .map((m) => ({
+            id: m.trackId,
+            name: m.name,
+            parentReference: { id: m.parentFolderId, name: m.parentFolderName },
+          }));
+      } catch (_) {}
     }
-  } catch (e) {
-    log("resume 预拉失败:", e.message);
-    return; // 拉不到曲子,连 overlay 都不弹,等用户在 browser 里挑
+  } else if (offlineMode) {
+    log("offline 且当前曲无缓存,无法 resume play");
+    return;
+  } else {
+    try {
+      const fresh = await fetchItem(state.currentTrack.id);
+      audio.src = fresh["@microsoft.graph.downloadUrl"];
+      currentSrcKind = "downloadUrl";
+      restorePositionOnLoadedMetadata =
+        state.positions[state.currentTrack.id] ?? state.position ?? 0;
+      if (state.currentTrack.parentFolderId) {
+        try {
+          const siblings = await listFolder(state.currentTrack.parentFolderId);
+          trackFolderItems = siblings.filter(isAudio);
+        } catch (e) {
+          log("加载同级文件失败:", e.message);
+        }
+      }
+    } catch (e) {
+      log("resume 预拉失败:", e.message);
+      return;
+    }
   }
 
   // 试 autoplay。Chrome/Edge PWA 攒了 engagement 会放行;iOS 必拒,这时弹蒙层
@@ -1020,6 +1255,18 @@ async function main() {
     result = await initAuth();
   } catch (e) {
     log("auth init 失败:", e.message);
+    return;
+  }
+
+  if (result.offline) {
+    log("auth 离线模式(MSAL CDN 未加载):", result.msalError || "");
+    offlineMode = true;
+    document.body.classList.add("offline");
+    btnLogin.hidden = true;
+    btnLogout.hidden = true;
+    userEl.textContent = "离线 · 仅缓存可用";
+    await renderBrowser();
+    await restoreSession();
     return;
   }
 

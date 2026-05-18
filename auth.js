@@ -37,10 +37,16 @@ async function loadMsal() {
 
 // Init 时除了恢复账号身份,还要 silent 试一次拿 token,确认本 app 真的被授权过。
 // 否则缓存账号(可能来自同 origin 的另一个 app)会让 UI 误标"已登录"。
+// 离线场景:MSAL CDN 全失败 → 返回 { offline: true },app 进入只读 / 缓存模式。
 export function initAuth() {
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    const msal = await loadMsal();
+    let msal;
+    try {
+      msal = await loadMsal();
+    } catch (e) {
+      return { signedIn: false, account: null, offline: true, msalError: e.message };
+    }
     pca = new msal.PublicClientApplication({
       auth: {
         clientId: CLIENT_ID,

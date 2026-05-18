@@ -5,7 +5,7 @@
 // 改了任何 precache 文件之后,bump CACHE_VERSION;activate 会清掉旧 cache。
 // skipWaiting + clients.claim 让新 SW 在下次刷新时立即接管。
 
-const CACHE_VERSION = "v9-2026-05-18-overlay-opaque";
+const CACHE_VERSION = "v10-2026-05-18-offline-pin";
 const CACHE_NAME = `br-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [

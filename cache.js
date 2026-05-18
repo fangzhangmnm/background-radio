@@ -1,18 +1,34 @@
 // IndexedDB LRU 音频缓存。
 //
-// 两个 store:blobs(trackId → Blob)、meta(trackId → {size, type, name, duration, lastPlayed})。
-// Blob 常驻 IndexedDB,**不要长期挂在 JS 变量上**,iOS 会把它算成不可回收内存。
+// 两个 store:blobs(trackId → Blob)、meta(trackId → {size, type, name, duration,
+//   lastPlayed, pinned, parentFolderId, parentFolderName})。
 //
-// 容量:CAP_BYTES。set() 前 evict 最老的 lastPlayed 直到留够空间。
-// 失效检测:无 —— OneDrive 是 SSOT,但缓存按 trackId 索引,等同于内容寻址;
-//   要换文件:用户长按删除手动失效。
+// pinned = true 的 entry:
+//   - 永远不会被 LRU 淘汰
+//   - 容量不够装下新 blob 时:如果非 pinned 部分腾不出空间 → 静默不写入(不抛、不淘汰 pinned)
+//
+// 容量默认 250 MB,用户在菜单可改。
+// 失效检测:无 —— OneDrive 是 SSOT,缓存按 trackId 索引等同内容寻址;换文件 = 用户长按删手动失效。
 
 const DB_NAME = "br-cache";
 const DB_VERSION = 1;
 const STORE_BLOBS = "blobs";
 const STORE_META = "meta";
 
-export const CAP_BYTES = 800 * 1024 * 1024;
+const DEFAULT_CAP_BYTES = 250 * 1024 * 1024;
+let capBytes = DEFAULT_CAP_BYTES;
+
+export function setCapMB(mb) {
+  if (typeof mb !== "number" || !isFinite(mb) || mb < 50) return false;
+  capBytes = Math.floor(mb) * 1024 * 1024;
+  return true;
+}
+export function getCapMB() {
+  return Math.round(capBytes / 1024 / 1024);
+}
+export function getCapBytes() {
+  return capBytes;
+}
 
 let dbPromise = null;
 
@@ -93,30 +109,41 @@ export async function del(trackId) {
   });
 }
 
-// 留至少 reserveBytes 字节的空间;淘汰最老的 lastPlayed 直到总占用 ≤ CAP - reserve
+// 试着腾够 reserveBytes 的空间。
+// 规则:只淘汰非 pinned 的最老 entry。如果连把所有非 pinned 都删了还是不够,返回 false。
 async function ensureRoom(reserveBytes) {
-  let all = await listAllMeta();
-  let total = all.reduce((a, m) => a + (m.size || 0), 0);
-  if (total + reserveBytes <= CAP_BYTES) return;
+  const all = await listAllMeta();
+  const pinned = all.filter((m) => m.pinned);
+  const evictable = all.filter((m) => !m.pinned);
 
-  all.sort((a, b) => (a.lastPlayed || 0) - (b.lastPlayed || 0));
-  for (const m of all) {
-    if (total + reserveBytes <= CAP_BYTES) break;
+  const pinnedSize = pinned.reduce((a, m) => a + (m.size || 0), 0);
+  // pinned 占的空间 + 这次要写的 > cap → 永远塞不进
+  if (pinnedSize + reserveBytes > capBytes) return false;
+
+  evictable.sort((a, b) => (a.lastPlayed || 0) - (b.lastPlayed || 0));
+  let total = pinnedSize + evictable.reduce((a, m) => a + (m.size || 0), 0);
+  for (const m of evictable) {
+    if (total + reserveBytes <= capBytes) break;
     await del(m.trackId);
     total -= m.size || 0;
   }
+  return true;
 }
 
+// 写入 blob;成功返回 true,容量塞不下返回 false(不抛错,调用方静默接受)
 export async function set(trackId, blob, extraMeta = {}) {
-  if (blob.size > CAP_BYTES) {
-    throw new Error(`blob (${blob.size}) 超过 cap (${CAP_BYTES})`);
+  if (blob.size > capBytes) {
+    return false; // 单首就比 cap 大,直接放弃
   }
-  await ensureRoom(blob.size);
+  const ok = await ensureRoom(blob.size);
+  if (!ok) return false; // pinned 太多,塞不下
+
   const meta = {
     trackId,
     size: blob.size,
     type: blob.type,
     lastPlayed: Date.now(),
+    pinned: false,
     ...extraMeta,
   };
   const db = await openDb();
@@ -124,7 +151,20 @@ export async function set(trackId, blob, extraMeta = {}) {
   tx.objectStore(STORE_BLOBS).put(blob, trackId);
   tx.objectStore(STORE_META).put(meta);
   return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function setPinned(trackId, pinned) {
+  const m = await getMeta(trackId);
+  if (!m) return false;
+  m.pinned = !!pinned;
+  const db = await openDb();
+  const tx = db.transaction(STORE_META, "readwrite");
+  tx.objectStore(STORE_META).put(m);
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve(true);
     tx.onerror = () => reject(tx.error);
   });
 }
@@ -143,7 +183,11 @@ export async function clearAll() {
 export async function stats() {
   const all = await listAllMeta();
   const total = all.reduce((acc, m) => acc + (m.size || 0), 0);
-  return { count: all.length, totalBytes: total, capBytes: CAP_BYTES };
+  const pinnedCount = all.filter((m) => m.pinned).length;
+  const pinnedBytes = all
+    .filter((m) => m.pinned)
+    .reduce((acc, m) => acc + (m.size || 0), 0);
+  return { count: all.length, totalBytes: total, capBytes, pinnedCount, pinnedBytes };
 }
 
 export function formatBytes(n) {
