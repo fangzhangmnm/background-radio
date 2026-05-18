@@ -86,8 +86,14 @@ body {
   background: var(--bg-surface);
   border-left: 1px solid var(--hairline);
   border-right: 1px solid var(--hairline);
-  /* iPhone home indicator 让位:.controls 之下留出 bg-surface 一条 */
-  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Home indicator 区:与控件 cell 同色的 bg-surface 一条,直通屏底。
+   内容(图标/字)还停在 .controls 的 9rem 安全区里,系统横条只压这条空白 */
+.safe-bottom {
+  flex-shrink: 0;
+  height: env(safe-area-inset-bottom);
+  background: var(--bg-surface);
 }
 
 /* === Top bar === */
@@ -540,6 +546,8 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   flex-direction: column;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* 底 safe-area:home indicator 区 = drawer 同色 bg-surface,内容 scroll 到底之上 */
+  padding-bottom: env(safe-area-inset-bottom);
 }
 .menu-drawer.open {
   transform: translateX(0);
@@ -549,7 +557,8 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.8rem 1.2rem;
+  /* 顶 safe-area:跟主 top-bar 一致,黑色 status bar 模式下不被压 */
+  padding: max(0.8rem, env(safe-area-inset-top)) 1.2rem 0.8rem;
   border-bottom: 1px solid var(--hairline);
 }
 
