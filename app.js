@@ -662,3 +662,14 @@ async function main() {
 }
 
 main().catch((e) => log("启动失败:", e.message));
+
+// === Service worker 注册 ===
+// 不阻塞 main(),失败也不要紧(SW 在 http://localhost 上能跑;file:// 不行)
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("./service-worker.js")
+      .then((reg) => log("SW 已注册 scope=", reg.scope))
+      .catch((e) => log("SW 注册失败:", e.message));
+  });
+}

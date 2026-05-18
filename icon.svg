@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Background Radio">
+  <!-- 圆角方底,暖炭灰 -->
+  <rect width="512" height="512" rx="80" fill="#221f1a"/>
+
+  <!-- dial face: 上半圆环 annulus(pivot 256,380,outer 180,inner 110)-->
+  <path d="M 76 380 A 180 180 0 0 1 436 380 L 366 380 A 110 110 0 0 0 146 380 Z"
+        fill="#d8c8a0" stroke="#5a4520" stroke-width="3"/>
+
+  <!-- 微反光弧带,贴 dial 顶 -->
+  <path d="M 82 376 A 174 174 0 0 1 430 376 L 372 376 A 116 116 0 0 0 140 376 Z"
+        fill="#e8dab0" opacity="0.55"/>
+
+  <!-- 9 个刻度,深棕 -->
+  <g stroke="#3a2812" stroke-width="4" stroke-linecap="round">
+    <line x1="146"   y1="380"   x2="116"   y2="380"/>
+    <line x1="154.4" y1="337.9" x2="126.7" y2="326.4"/>
+    <line x1="178.2" y1="302.2" x2="157.0" y2="281.0"/>
+    <line x1="213.9" y1="278.4" x2="202.4" y2="250.7"/>
+    <line x1="256"   y1="270"   x2="256"   y2="240"/>
+    <line x1="298.1" y1="278.4" x2="309.6" y2="250.7"/>
+    <line x1="333.8" y1="302.2" x2="355.0" y2="281.0"/>
+    <line x1="357.6" y1="337.9" x2="385.3" y2="326.4"/>
+    <line x1="366"   y1="380"   x2="396"   y2="380"/>
+  </g>
+
+  <!-- 调谐指针,黄铜调,停在偏右"调到某台" -->
+  <line x1="256" y1="380" x2="305.7" y2="259.9"
+        stroke="#c79460" stroke-width="9" stroke-linecap="round"/>
+  <!-- 指针高光（细一点的亮色压在上面）-->
+  <line x1="256" y1="380" x2="305.7" y2="259.9"
+        stroke="#e8c790" stroke-width="3" stroke-linecap="round" opacity="0.8"/>
+
+  <!-- 黄铜 pivot -->
+  <circle cx="256" cy="380" r="20" fill="#c79460" stroke="#3a2a14" stroke-width="3"/>
+  <circle cx="256" cy="380" r="8"  fill="#1a0e02"/>
+
+</svg>
