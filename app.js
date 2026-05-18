@@ -22,7 +22,7 @@ const defaultState = {
   // currently loaded track
   currentTrack: null, // { id, name, parentFolderId }
   // loop behavior on `ended`
-  mode: "folder", // "single" | "folder" | "stop"
+  mode: "single", // "single" | "folder" | "stop"
   // current track's last position (mirror of positions[currentTrack.id], kept for convenience)
   position: 0,
   // per-track resume position map (trackId -> seconds). Entry deleted once track plays to end.
