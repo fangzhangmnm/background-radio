@@ -76,6 +76,8 @@ body {
 }
 
 /* shell = 抬起的卡片:用 surface 色 vs canvas 拉开层级,纯平 */
+/* 底部 safe-area 不在 .shell 上处理 —— 在 .controls 的每列 border-bottom 里处理,
+   这样 controls 的竖向 hairline 也能延伸到屏底 */
 .shell {
   position: relative;
   height: 100dvh;
@@ -86,10 +88,6 @@ body {
   background: var(--bg-surface);
   border-left: 1px solid var(--hairline);
   border-right: 1px solid var(--hairline);
-  /* 必须的!iOS 在 home indicator 区会强制截 viewport,不留这条 padding 的话
-     .controls 底部直接被切掉。bg-surface 在 padding 里继续,跟 cells 同色,
-     视觉上是 controls 的延伸 */
-  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* === Top bar === */
@@ -384,15 +382,29 @@ body.offline .status-track::before {
 }
 
 /* === Controls — Win8 tile,4 列(left col / play / right col / vol),无圆角无 padding === */
-/* gap=1px + 容器 bg=hairline 让 1px 缝充当 cell 分隔线 */
+/* 高度 = 9rem(图标 + 字的安全区)+ env(safe-area-inset-bottom)(home indicator 让位)。
+   每列各自带一条 saib 高的 bg-surface border-bottom,所以列底色延伸到屏底;
+   container 的 gap=1px 也跟着延伸,竖向 hairline 通到屏底,不再断 */
 .controls {
   display: grid;
   grid-template-columns: 1fr 1.8fr 1fr auto;
   gap: 1px;
-  height: 9rem;
   background: var(--hairline);
   border-top: 1px solid var(--hairline);
   flex-shrink: 0;
+}
+
+/* 每列共用的高度规则:9rem 内容 + saib 实色 border 延伸 */
+.ctrl-col,
+button.ctrl-play-big,
+.vol-strip {
+  box-sizing: content-box;
+  height: 9rem;
+  border-bottom: env(safe-area-inset-bottom) solid var(--bg-surface);
+}
+/* play cell 是 filled accent,border-bottom 让 saib 那段保持 accent 色一致 */
+button.ctrl-play-big {
+  border-bottom-color: var(--accent);
 }
 
 .ctrl-col {
