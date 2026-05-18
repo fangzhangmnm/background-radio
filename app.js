@@ -1290,44 +1290,77 @@ async function main() {
 
 main().catch((e) => log("启动失败:", e.message));
 
-// === Service worker 注册 + auto-update toast ===
-// SW 后台 revalidate;ETag/length 变了就 postMessage,我们弹 toast,用户点刷新才 reload
-// (永不自动 reload,可能正在放歌)
+// === Service worker registration + auto-update toast(对齐 WebXiaoHeiWu) ===
+// 三条独立通路触发 toast:
+//   (1) SW SWR 后台 revalidate 发现 ETag/length 变 → postMessage("asset-updated")
+//   (2) 注册时发现已经有 waiting 新 SW + 当前有 controller → 立刻弹
+//   (3) updatefound + statechange → 新 SW 装完那一刻弹
+// 永不自动 reload。用户 dismiss 本次会话内不再骚扰。
 const updateToast = $("update-toast");
 const btnUpdateReload = $("btn-update-reload");
 const btnUpdateDismiss = $("btn-update-dismiss");
 
+let updateDismissed = false;
+
 function showUpdateToast() {
+  if (updateDismissed) return;
+  if (!updateToast) return;
   updateToast.hidden = false;
 }
 function hideUpdateToast() {
-  updateToast.hidden = true;
+  if (updateToast) updateToast.hidden = true;
 }
 
-btnUpdateDismiss?.addEventListener("click", hideUpdateToast);
-btnUpdateReload?.addEventListener("click", async () => {
+btnUpdateDismiss?.addEventListener("click", () => {
+  updateDismissed = true;
+  hideUpdateToast();
+});
+btnUpdateReload?.addEventListener("click", () => {
   hideUpdateToast();
   try {
-    if (navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({ type: "skip-waiting" });
-    }
+    navigator.serviceWorker?.controller?.postMessage({ type: "skip-waiting" });
   } catch (_) {}
   // 持久化位置,reload 之后 resume 接着放
   if (state.currentTrack) persistPosition();
   location.reload();
 });
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("./service-worker.js")
-      .then((reg) => log("SW 已注册 scope=", reg.scope))
-      .catch((e) => log("SW 注册失败:", e.message));
-  });
+// 本地开发跳过 SW(F5 才是真刷新);GH Pages 等部署生效
+const LOCAL_DEV_HOSTS = new Set(["localhost", "127.0.0.1", "::1", ""]);
+if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type === "asset-updated") {
-      log("SW 报告:", event.data.url, "有新版本");
+      log("SW 报告 asset-updated:", event.data.url);
       showUpdateToast();
     }
+  });
+
+  window.addEventListener("load", async () => {
+    let registration;
+    try {
+      registration = await navigator.serviceWorker.register("./service-worker.js");
+      log("SW 已注册 scope=", registration.scope);
+    } catch (e) {
+      log("SW 注册失败:", e.message);
+      return;
+    }
+
+    // 通路 (2):打开时已经有 waiting SW + 当前页被旧 SW 控制 → 立即提示
+    if (registration.waiting && navigator.serviceWorker.controller) {
+      log("SW: 已有 waiting,立即提示");
+      showUpdateToast();
+    }
+
+    // 通路 (3):新 SW 装完
+    registration.addEventListener("updatefound", () => {
+      const newWorker = registration.installing;
+      if (!newWorker) return;
+      newWorker.addEventListener("statechange", () => {
+        if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+          log("SW: updatefound → installed,提示");
+          showUpdateToast();
+        }
+      });
+    });
   });
 }

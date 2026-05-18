@@ -86,6 +86,8 @@ body {
   background: var(--bg-surface);
   border-left: 1px solid var(--hairline);
   border-right: 1px solid var(--hairline);
+  /* iPhone home indicator 让位:.controls 之下留出 bg-surface 一条 */
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* === Top bar === */
@@ -94,7 +96,9 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.6rem 1rem;
+  /* 顶部 safe-area:iOS 状态栏 / Dynamic Island 让位。
+     viewport-fit=cover 让 content 钻到状态栏下面,这里强制顶下来 */
+  padding: max(0.6rem, env(safe-area-inset-top)) 1rem 0.6rem;
   border-bottom: 1px solid var(--hairline);
   flex-shrink: 0;
 }
