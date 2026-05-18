@@ -244,11 +244,22 @@ function pinStateOf(trackId, cacheStatusMap, pinnedStatusMap) {
 
 function pinIconHtml(state) {
   const titles = {
-    empty: "点击下载并锁定离线",
-    cached: "已缓存(点击锁定为不可淘汰)",
-    pinned: "已锁定(点击解锁)",
+    empty: "未存,点击下载并锁定离线",
+    cached: "已自动缓存(点击锁定不可淘汰)",
+    pinned: "已锁定离线(点击解锁)",
+    loading: "正在下载...",
   };
-  return `<button class="pin-btn" data-pin-state="${state}" aria-label="${titles[state]}" title="${titles[state]}"></button>`;
+  // 三个状态各一个 SVG,CSS 按 data-pin-state 切显示
+  const dlOutline = `<svg class="pin-glyph pin-dl-outline" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M12 4v11m-4-4 4 4 4-4M5 20h14" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`;
+  const dlFilled = `<svg class="pin-glyph pin-dl-filled" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M5 19h14v2H5zM10 4h4v6h3l-5 6-5-6h3z" fill="currentColor"/></svg>`;
+  const lock = `<svg class="pin-glyph pin-lock" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" fill="none"/>
+    <rect x="5" y="10" width="14" height="10" rx="1" fill="currentColor"/></svg>`;
+  return `<button class="pin-btn" data-pin-state="${state}" aria-label="${titles[state]}" title="${titles[state]}">${dlOutline}${dlFilled}${lock}</button>`;
 }
 
 async function renderBrowser() {
@@ -335,8 +346,9 @@ async function renderBrowser() {
         ev.stopPropagation();
         handlePinClick(row.item, li);
       });
-      li.addEventListener("click", () => playTrack(row.item));
+      // longPress 先注册,这样它的 capture click listener 能 stopImmediatePropagation 拦住后面的 playTrack
       attachLongPress(li, () => handleLongPressDelete(row.item, li));
+      li.addEventListener("click", () => playTrack(row.item));
     }
     folderListEl.appendChild(li);
   }
@@ -393,8 +405,8 @@ async function renderBrowserFromCache() {
       ev.stopPropagation();
       handlePinClick(fakeItem, li);
     });
-    li.addEventListener("click", () => playTrack(fakeItem));
     attachLongPress(li, () => handleLongPressDelete(fakeItem, li));
+    li.addEventListener("click", () => playTrack(fakeItem));
     folderListEl.appendChild(li);
   }
 }
@@ -420,7 +432,10 @@ function setPlayGlyph() {
 // 当前 audio.src 的来源,失败处理 / blob 释放都需要知道
 let currentSrcKind = null; // "blob" | "downloadUrl" | null
 let currentBlobUrl = null;
-let prefetchTriggered = false; // 当前曲是否已触发过下一首 prefetch
+// 缓存只通过用户手动点 pin icon 触发(避免 audio.src 流式 + cache.fetch 同时跑导致双下载)。
+// pendingCacheIds 防重入,pendingCacheControllers 让"缓存中点击 = 取消"成立
+const pendingCacheIds = new Set();
+const pendingCacheControllers = new Map();
 
 function clearBlobUrl() {
   if (currentBlobUrl) {
@@ -430,12 +445,17 @@ function clearBlobUrl() {
 }
 
 // 后台 fetch 整首入库 —— 不阻塞调用方
-// 返回 true / false 让调用方知道有没有成功(让 pin 流程能根据结果决定是否 setPinned)
+// 返回 true / false。AbortController 让 caller 能在缓存中途取消
 async function backgroundCacheTrack(driveItem, options = {}) {
   if (offlineMode) {
     log("offline: 跳过 background cache");
     return false;
   }
+  if (pendingCacheIds.has(driveItem.id)) return false; // 已在 fetch 中,不重入
+  pendingCacheIds.add(driveItem.id);
+  const controller = new AbortController();
+  pendingCacheControllers.set(driveItem.id, controller);
+
   try {
     if (await cache.isCached(driveItem.id)) {
       if (options.pinAfter) {
@@ -452,7 +472,7 @@ async function backgroundCacheTrack(driveItem, options = {}) {
       dl = fresh["@microsoft.graph.downloadUrl"];
     } catch (_) {}
     if (!dl) throw new Error("无 downloadUrl");
-    const resp = await fetch(dl);
+    const resp = await fetch(dl, { signal: controller.signal });
     if (!resp.ok) throw new Error(`fetch ${resp.status}`);
     const blob = await resp.blob();
     const ok = await cache.set(driveItem.id, blob, {
@@ -473,12 +493,33 @@ async function backgroundCacheTrack(driveItem, options = {}) {
     refreshCacheInfo().catch(() => {});
     return true;
   } catch (e) {
-    log(`后台缓存失败 ${driveItem.name}:`, e.message);
+    if (e.name === "AbortError") {
+      log(`缓存已取消: ${driveItem.name}`);
+    } else {
+      log(`后台缓存失败 ${driveItem.name}:`, e.message);
+    }
     return false;
+  } finally {
+    pendingCacheIds.delete(driveItem.id);
+    pendingCacheControllers.delete(driveItem.id);
   }
 }
 
+function cancelCacheFor(trackId) {
+  const c = pendingCacheControllers.get(trackId);
+  if (c) {
+    c.abort();
+    return true;
+  }
+  return false;
+}
+
 async function playTrack(driveItem, startAt = null) {
+  // 点同一首正在播的:忽略,不从头开始。任何模式都一样
+  // (要重头放就先 seek 到 0,或者用 prev/next 切走再切回)
+  if (state.currentTrack?.id === driveItem.id && audio.src) {
+    return;
+  }
   // 切歌前把当前正在播的位置存进 map(模式如果允许后续恢复就用得上)
   // 但如果当前曲已经自然 ended,不要把"末尾位置"重新写回 map —— handleEnded 刚清掉它
   if (
@@ -503,6 +544,7 @@ async function playTrack(driveItem, startAt = null) {
     id: driveItem.id,
     name: driveItem.name,
     parentFolderId: driveItem.parentReference?.id ?? null,
+    parentFolderName: driveItem.parentReference?.name ?? null,
   };
   state.position = startAt;
   saveState();
@@ -545,9 +587,8 @@ async function playTrack(driveItem, startAt = null) {
     }
   }
 
-  // 释放上一首的 blob URL,prefetch flag 重置
+  // 释放上一首的 blob URL
   clearBlobUrl();
-  prefetchTriggered = false;
 
   // 先查 cache。命中 → blob URL;未命中 → 在线 fallback 到 downloadUrl,离线放弃
   let cachedBlob = null;
@@ -581,15 +622,11 @@ async function playTrack(driveItem, startAt = null) {
       audio.src = dl;
     }
     currentSrcKind = "downloadUrl";
-
-    // "首播不存盘、下次重播再 fetch" —— 用 state.everPlayed 当 2nd-play 触发器
-    if (state.everPlayed[driveItem.id]) {
-      // 之前听过这首 + 这次又点了 + 没缓存 → 背景灌入
-      backgroundCacheTrack(driveItem);
-    }
+    // 不主动入库:避免 audio.src 流式 + 我们 fetch 全量 = 双下载。
+    // 缓存只通过用户手动点 pin icon 触发(backgroundCacheTrack with pinAfter: true)。
   }
 
-  // 记下这首被加载过
+  // (state.everPlayed 是旧 2nd-play gate 的遗留字段,保留以免破坏历史 localStorage 结构)
   state.everPlayed[driveItem.id] = true;
   saveState();
 
@@ -625,26 +662,7 @@ async function refetchDownloadUrlAndResume() {
   }
 }
 
-// === Folder-loop prefetch ===
-// 当前曲剩 < PREFETCH_THRESHOLD_S 秒 + folder loop 模式 → 后台拉下一首入库
-const PREFETCH_THRESHOLD_S = 60;
-function maybePrefetchNext() {
-  if (state.mode !== "folder") return;
-  if (prefetchTriggered) return;
-  if (!trackFolderItems || trackFolderItems.length < 2) return;
-  if (!state.currentTrack) return;
-  const dur = audio.duration;
-  if (!isFinite(dur) || dur <= 0) return;
-  if (dur - audio.currentTime > PREFETCH_THRESHOLD_S) return;
-
-  const idx = trackFolderItems.findIndex((t) => t.id === state.currentTrack.id);
-  if (idx === -1) return;
-  const nextIdx = idx === trackFolderItems.length - 1 ? 0 : idx + 1;
-  const next = trackFolderItems[nextIdx];
-  if (!next) return;
-  prefetchTriggered = true;
-  backgroundCacheTrack(next);
-}
+// (prefetch & auto-cache 已移除:只通过用户点 pin icon 显式触发缓存,避免双下载)
 
 // === Cache UI ===
 async function refreshCachedMarkers() {
@@ -664,27 +682,36 @@ async function refreshCachedMarkers() {
   }
 }
 
-// 点 pin icon:在 empty → caching/pinned → unpin → cached 之间循环
+// 点 pin icon 状态循环:
+//   empty   → 触发后台下载 + pinAfter,UI 进 loading
+//   loading → 取消下载,UI 回 empty
+//   cached  → setPinned(true)
+//   pinned  → setPinned(false)(仍 cached,可被淘汰)
 async function handlePinClick(driveItem, li) {
+  const btn = li.querySelector(".pin-btn");
+
+  // 正在 loading:取消下载
+  if (pendingCacheIds.has(driveItem.id)) {
+    cancelCacheFor(driveItem.id);
+    if (btn) btn.dataset.pinState = "empty";
+    return;
+  }
+
   const m = await cache.getMeta(driveItem.id);
   if (!m) {
-    // empty → 触发下载 + pin。需要网络
     if (offlineMode) {
       log("offline 不能 pin 未缓存的曲");
       return;
     }
-    const btn = li.querySelector(".pin-btn");
     if (btn) btn.dataset.pinState = "loading";
     const ok = await backgroundCacheTrack(driveItem, { pinAfter: true });
     if (!ok && btn) btn.dataset.pinState = "empty";
   } else if (!m.pinned) {
-    // cached → pinned
     await cache.setPinned(driveItem.id, true);
     log(`pin: ${driveItem.name}`);
     refreshCachedMarkers().catch(() => {});
     refreshCacheInfo().catch(() => {});
   } else {
-    // pinned → unpinned (仍 cached)
     await cache.setPinned(driveItem.id, false);
     log(`unpin: ${driveItem.name}`);
     refreshCachedMarkers().catch(() => {});
@@ -726,12 +753,23 @@ async function handleLongPressDelete(driveItem, li) {
   }
 }
 
-// 简陋但够用的长按:鼠标 / 触摸都接;一旦触发了 long-press,屏蔽紧随的 click
+// 长按:鼠标 / 触摸都接;一旦 long-press 触发,屏蔽紧随的 click(包括同元素上注册更早的 listener)
+// 关键 bug fix:
+//  - 之前 ANY touchmove 都 cancel,手指微抖就废了 timer,长按 600ms 经常根本没等到
+//  - 之前用 stopPropagation 不够,因为 click listener 在同元素上按注册顺序触发,
+//    playTrack 注册在前,我的 capture listener 后跑就太晚了。改用 stopImmediatePropagation
+//    + 该 helper 必须比 click 监听器**先**注册
+const LONGPRESS_MOVE_THRESHOLD_PX = 10;
 function attachLongPress(el, handler, ms = 600) {
   let timer = null;
   let fired = false;
-  const start = () => {
+  let startX = 0;
+  let startY = 0;
+  const start = (e) => {
     fired = false;
+    const t = e.touches?.[0];
+    startX = t?.clientX ?? e.clientX ?? 0;
+    startY = t?.clientY ?? e.clientY ?? 0;
     timer = setTimeout(() => {
       fired = true;
       handler();
@@ -743,10 +781,18 @@ function attachLongPress(el, handler, ms = 600) {
       timer = null;
     }
   };
+  const move = (e) => {
+    const t = e.touches?.[0];
+    const x = t?.clientX ?? e.clientX ?? 0;
+    const y = t?.clientY ?? e.clientY ?? 0;
+    if (Math.hypot(x - startX, y - startY) > LONGPRESS_MOVE_THRESHOLD_PX) {
+      cancel();
+    }
+  };
   el.addEventListener("touchstart", start, { passive: true });
   el.addEventListener("touchend", cancel);
   el.addEventListener("touchcancel", cancel);
-  el.addEventListener("touchmove", cancel);
+  el.addEventListener("touchmove", move, { passive: true });
   el.addEventListener("mousedown", start);
   el.addEventListener("mouseup", cancel);
   el.addEventListener("mouseleave", cancel);
@@ -754,7 +800,7 @@ function attachLongPress(el, handler, ms = 600) {
     "click",
     (e) => {
       if (fired) {
-        e.stopPropagation();
+        e.stopImmediatePropagation();
         e.preventDefault();
         fired = false;
       }
@@ -909,10 +955,7 @@ audio.addEventListener("loadedmetadata", () => {
   updateMediaSessionHandlers();
   updateMediaSessionPosition();
 });
-audio.addEventListener("timeupdate", () => {
-  updateSeekDisplay();
-  maybePrefetchNext();
-});
+audio.addEventListener("timeupdate", updateSeekDisplay);
 audio.addEventListener("play", () => {
   setPlayGlyph();
   if (hasMediaSession()) navigator.mediaSession.playbackState = "playing";

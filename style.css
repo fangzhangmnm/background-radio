@@ -245,38 +245,43 @@ main {
   white-space: nowrap;
 }
 
-/* 3-state pin button:空(未缓存) / cached(已缓存,可被淘汰) / pinned(锁定不可淘汰) */
+/* 3-state pin button:hit area 40px(iOS HIG min)+ 三个 SVG 切换显示
+   - empty   = 下载箭头空心(灰):未缓存,点一下下载并锁定
+   - cached  = 下载箭头实心(accent-deep):后台已自动缓存,可被 LRU 淘汰
+   - pinned  = 锁(accent):用户锁定,永不淘汰
+   - loading = 下载箭头空心 + 脉冲:正在下载 */
 .entry .pin-btn {
-  width: 1.05rem;
-  height: 1.05rem;
+  width: 2.4rem;
+  height: 2.4rem;
   padding: 0;
-  border-radius: 50%;
+  border: none;
   background: transparent;
-  border: 1.5px solid var(--hairline);
   cursor: pointer;
   flex-shrink: 0;
-  margin-left: 0.1rem;
-  box-sizing: border-box;
-  transition: background 0.12s, border-color 0.12s, transform 0.15s;
+  margin-left: 0.15rem;
+  margin-right: -0.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
 }
-.entry .pin-btn[data-pin-state="cached"] {
-  background: var(--accent-deep);
-  border-color: var(--accent-deep);
+.entry .pin-btn .pin-glyph {
+  width: 1.15rem;
+  height: 1.15rem;
+  display: none;
+  transition: transform 0.15s;
 }
-.entry .pin-btn[data-pin-state="pinned"] {
-  background: var(--accent);
-  border-color: var(--accent);
-  outline: 1.5px solid var(--accent);
-  outline-offset: 2px;
-}
-.entry .pin-btn[data-pin-state="loading"] {
-  background: transparent;
-  border-color: var(--accent);
-  animation: pin-pulse 1s ease-in-out infinite;
-}
-.entry .pin-btn:hover {
+.entry .pin-btn:hover .pin-glyph,
+.entry .pin-btn:active .pin-glyph {
   transform: scale(1.12);
 }
+
+/* 显示规则 */
+.entry .pin-btn[data-pin-state="empty"]   .pin-dl-outline { display: block; color: var(--hairline); }
+.entry .pin-btn[data-pin-state="cached"]  .pin-dl-filled  { display: block; color: var(--accent-deep); }
+.entry .pin-btn[data-pin-state="pinned"]  .pin-lock       { display: block; color: var(--accent); }
+.entry .pin-btn[data-pin-state="loading"] .pin-dl-outline { display: block; color: var(--accent); animation: pin-pulse 1s ease-in-out infinite; }
+
 @keyframes pin-pulse {
   0%, 100% { opacity: 0.35; }
   50%      { opacity: 1; }
