@@ -129,6 +129,23 @@ export async function set(trackId, blob, extraMeta = {}) {
   });
 }
 
+export async function clearAll() {
+  const db = await openDb();
+  const tx = db.transaction([STORE_BLOBS, STORE_META], "readwrite");
+  tx.objectStore(STORE_BLOBS).clear();
+  tx.objectStore(STORE_META).clear();
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function stats() {
+  const all = await listAllMeta();
+  const total = all.reduce((acc, m) => acc + (m.size || 0), 0);
+  return { count: all.length, totalBytes: total, capBytes: CAP_BYTES };
+}
+
 export function formatBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;

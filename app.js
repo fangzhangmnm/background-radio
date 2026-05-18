@@ -51,15 +51,36 @@ const btnNext = $("btn-next");
 const btnRewind = $("btn-rewind");
 const btnForward = $("btn-forward");
 const playGlyph = $("play-glyph");
-const trackNameEl = $("track-name");
-const scopeLabelEl = $("scope-label");
+const statusTrackEl = $("status-track");
+const statusScopeEl = $("status-scope");
 const posCurrentEl = $("pos-current");
 const posDurationEl = $("pos-duration");
 const seekBar = $("seek-bar");
 const volumeBar = $("volume-bar");
 const folderListEl = $("folder-list");
-const loopSelect = $("loop-select");
+const menuToggle = $("menu-toggle");
+const menuClose = $("menu-close");
+const menuDrawer = $("menu-drawer");
+const menuBackdrop = $("menu-backdrop");
+const cacheInfoEl = $("cache-info");
+const btnCacheClear = $("btn-cache-clear");
+const loopRadios = document.querySelectorAll('input[name="loop"]');
 const logEl = $("log");
+
+// === 文件名脱后缀(显示用,内部仍按完整名找文件)===
+function displayName(name) {
+  return String(name).replace(/\.(mp3|m4a|aac|flac|wav|ogg|opus|wma)$/i, "");
+}
+
+// === Scope 路径解析:Graph 给的 path 形如 "/drive/root:/Apps/<AppName>/folder1/folder2"
+//     去掉前面那一坨技术前缀,留 "/folder1/folder2",root 显示 "/"
+function scopeLabel(driveItem) {
+  const p = driveItem.parentReference?.path;
+  if (!p) return "";
+  const m = p.match(/^\/[^/]+\/[^/]+:\/[^/]+\/[^/]+(\/.*)?$/);
+  if (!m) return p;
+  return m[1] || "/";
+}
 
 // === Logging ===
 function log(...args) {
@@ -238,7 +259,7 @@ async function renderBrowser() {
       li.dataset.trackId = row.item.id;
       li.innerHTML =
         `<span class="icon">♪</span>` +
-        `<span class="name">${escapeHtml(row.item.name)}</span>` +
+        `<span class="name">${escapeHtml(displayName(row.item.name))}</span>` +
         (dur ? `<span class="meta">${dur}</span>` : "") +
         `<span class="cache-dot" title="${isHit ? '已缓存,长按删除' : ''}"></span>`;
       if (isHit) li.classList.add("cached");
@@ -304,8 +325,9 @@ async function backgroundCacheTrack(driveItem) {
         : null,
     });
     log(`已缓存: ${driveItem.name} ${cache.formatBytes(blob.size)}`);
-    // 刷新 UI 标记
+    // 刷新 UI 标记 + 菜单里的统计
     refreshCachedMarkers().catch(() => {});
+    refreshCacheInfo().catch(() => {});
   } catch (e) {
     log(`后台缓存失败 ${driveItem.name}:`, e.message);
   }
@@ -340,21 +362,15 @@ async function playTrack(driveItem, startAt = null) {
   state.position = startAt;
   saveState();
 
-  trackNameEl.textContent = driveItem.name;
-  scopeLabelEl.textContent = driveItem.parentReference?.path
-    ? driveItem.parentReference.path.replace(/^.*?approot:/, "") || "/"
-    : "";
+  statusTrackEl.textContent = displayName(driveItem.name);
+  statusScopeEl.textContent = scopeLabel(driveItem);
 
   // Highlight in current folder list if visible
   for (const el of folderListEl.querySelectorAll(".entry.active")) {
     el.classList.remove("active");
   }
-  // Try to find row by name (id not stored on DOM here)
-  for (const li of folderListEl.querySelectorAll(".entry")) {
-    if (li.querySelector(".name")?.textContent === driveItem.name) {
-      li.classList.add("active");
-    }
-  }
+  const li = folderListEl.querySelector(`.entry[data-track-id="${driveItem.id}"]`);
+  if (li) li.classList.add("active");
 
   // Refresh track-folder listing for advance logic
   if (state.currentTrack.parentFolderId) {
@@ -620,7 +636,7 @@ function hasMediaSession() {
 function updateMediaSessionMetadata() {
   if (!hasMediaSession() || !state.currentTrack) return;
   navigator.mediaSession.metadata = new MediaMetadata({
-    title: state.currentTrack.name,
+    title: displayName(state.currentTrack.name),
     artist: "Background Radio",
     album: currentBrowsePath() || "/",
   });
@@ -780,17 +796,22 @@ btnPrev.addEventListener("click", () => advance("prev"));
 btnNext.addEventListener("click", () => advance("next"));
 
 function applyModeUi() {
-  loopSelect.value = state.mode;
+  for (const r of loopRadios) {
+    r.checked = r.value === state.mode;
+  }
   // prev/next 任何模式都显示;Media Session handler 也总在
   updateMediaSessionHandlers();
 }
 
-loopSelect.addEventListener("change", () => {
-  state.mode = loopSelect.value;
-  saveState();
-  applyModeUi();
-  log(`loop mode → ${state.mode}`);
-});
+for (const r of loopRadios) {
+  r.addEventListener("change", () => {
+    if (!r.checked) return;
+    state.mode = r.value;
+    saveState();
+    applyModeUi();
+    log(`loop mode → ${state.mode}`);
+  });
+}
 
 // === Volume ===
 function applyVolume() {
@@ -823,6 +844,60 @@ btnLogout.addEventListener("click", async () => {
   log("已登出(仅本地缓存)");
 });
 
+// === Menu drawer ===
+function openMenu() {
+  menuDrawer.classList.add("open");
+  menuBackdrop.classList.add("show");
+  menuDrawer.setAttribute("aria-hidden", "false");
+  refreshCacheInfo().catch(() => {});
+}
+function closeMenu() {
+  menuDrawer.classList.remove("open");
+  menuBackdrop.classList.remove("show");
+  menuDrawer.setAttribute("aria-hidden", "true");
+}
+menuToggle.addEventListener("click", openMenu);
+menuClose.addEventListener("click", closeMenu);
+menuBackdrop.addEventListener("click", closeMenu);
+
+// === Cache info / clear all ===
+async function refreshCacheInfo() {
+  try {
+    const s = await cache.stats();
+    cacheInfoEl.textContent = `${s.count} 首 · ${cache.formatBytes(s.totalBytes)} / ${cache.formatBytes(s.capBytes)}`;
+  } catch (e) {
+    cacheInfoEl.textContent = "无法读取";
+  }
+}
+
+btnCacheClear.addEventListener("click", async () => {
+  const s = await cache.stats();
+  if (s.count === 0) {
+    log("缓存空,无需清除");
+    return;
+  }
+  if (!confirm(`清除全部本地缓存(${s.count} 首,${cache.formatBytes(s.totalBytes)})?\n不影响 OneDrive。`)) return;
+  // 正在播的如果是 blob,先切回 downloadUrl
+  if (currentSrcKind === "blob" && state.currentTrack) {
+    try {
+      const wasPosition = audio.currentTime;
+      const wasPlaying = !audio.paused;
+      clearBlobUrl();
+      const fresh = await fetchItem(state.currentTrack.id);
+      audio.src = fresh["@microsoft.graph.downloadUrl"];
+      currentSrcKind = "downloadUrl";
+      restorePositionOnLoadedMetadata = wasPosition;
+      if (wasPlaying) audio.play().catch(() => {});
+    } catch (e) {
+      log("切回 downloadUrl 失败:", e.message);
+    }
+  }
+  await cache.clearAll();
+  await refreshCachedMarkers();
+  await refreshCacheInfo();
+  log("已清除全部缓存");
+});
+
 // === Init ===
 const tapOverlay = $("tap-overlay");
 const tapTitleEl = $("tap-title");
@@ -846,8 +921,8 @@ tapOverlay.addEventListener("click", () => {
 
 async function restoreSession() {
   if (!state.currentTrack) return;
-  trackNameEl.textContent = state.currentTrack.name;
-  scopeLabelEl.textContent = `恢复中:position=${formatTime(state.position)}`;
+  statusTrackEl.textContent = displayName(state.currentTrack.name);
+  statusScopeEl.textContent = `恢复 @ ${formatTime(state.position)}`;
   posCurrentEl.textContent = formatTime(state.position);
   log("恢复:", state.currentTrack.name, "@", formatTime(state.position));
 
@@ -876,7 +951,7 @@ async function restoreSession() {
     log("autoplay 成功");
   } catch (e) {
     log("autoplay 被拒,弹 tap overlay:", e.message);
-    showTapOverlay(state.currentTrack.name);
+    showTapOverlay(displayName(state.currentTrack.name));
   }
 }
 
