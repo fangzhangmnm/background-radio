@@ -619,6 +619,26 @@ btnLogout.addEventListener("click", async () => {
 });
 
 // === Init ===
+const tapOverlay = $("tap-overlay");
+const tapTitleEl = $("tap-title");
+
+function showTapOverlay(title) {
+  tapTitleEl.textContent = title;
+  tapOverlay.hidden = false;
+}
+function hideTapOverlay() {
+  tapOverlay.hidden = true;
+}
+
+// 注意:audio.play() 必须在用户 gesture 同步路径里调,所以不要在 await 后头调
+tapOverlay.addEventListener("click", () => {
+  hideTapOverlay();
+  audio.play().catch((e) => {
+    log("点 overlay 后 play 仍失败:", e.message);
+    // 多半是 src 未就绪;给用户回个失败提示后再让大 ▶ 接管
+  });
+});
+
 async function restoreSession() {
   if (!state.currentTrack) return;
   trackNameEl.textContent = state.currentTrack.name;
@@ -626,14 +646,12 @@ async function restoreSession() {
   posCurrentEl.textContent = formatTime(state.position);
   log("恢复:", state.currentTrack.name, "@", formatTime(state.position));
 
-  // 尝试 autoplay。系统允许(装机 PWA + 之前点过 gesture 攒了 engagement)就接着放;
-  // 不允许(iOS 标准、首次访问)就静默失败,等用户点 ▶。
+  // 预拉 downloadUrl 和同级列表,这样后续无论是 autoplay 还是 tap overlay,play() 都能直接成
   try {
     const fresh = await fetchItem(state.currentTrack.id);
     audio.src = fresh["@microsoft.graph.downloadUrl"];
     restorePositionOnLoadedMetadata =
       state.positions[state.currentTrack.id] ?? state.position ?? 0;
-    // 加载同级文件以备 prev/next + Media Session
     if (state.currentTrack.parentFolderId) {
       try {
         const siblings = await listFolder(state.currentTrack.parentFolderId);
@@ -642,10 +660,18 @@ async function restoreSession() {
         log("加载同级文件失败:", e.message);
       }
     }
+  } catch (e) {
+    log("resume 预拉失败:", e.message);
+    return; // 拉不到曲子,连 overlay 都不弹,等用户在 browser 里挑
+  }
+
+  // 试 autoplay。Chrome/Edge PWA 攒了 engagement 会放行;iOS 必拒,这时弹蒙层
+  try {
     await audio.play();
     log("autoplay 成功");
   } catch (e) {
-    log("autoplay 被拒(正常,等点 ▶):", e.message);
+    log("autoplay 被拒,弹 tap overlay:", e.message);
+    showTapOverlay(state.currentTrack.name);
   }
 }
 
