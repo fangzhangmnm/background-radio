@@ -5,7 +5,7 @@
 // 改了任何 precache 文件之后,bump CACHE_VERSION;activate 会清掉旧 cache。
 // skipWaiting + clients.claim 让新 SW 在下次刷新时立即接管。
 
-const CACHE_VERSION = "v15-2026-05-18-controls-bleed-saib";
+const CACHE_VERSION = "v16-2026-05-18-vol-no-padding";
 const CACHE_NAME = `br-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [

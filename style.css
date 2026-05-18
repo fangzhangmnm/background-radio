@@ -495,13 +495,15 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 }
 
 /* === 右侧垂直音量条(本身也是一个 cell)=== */
+/* 不要 padding —— content-box 下 padding 会把 vol-strip 撑到比其它列高,
+   grid row 拉满 → 其它列下面露出容器 hairline 灰 */
 .vol-strip {
   background: var(--bg-surface);
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 0.4rem;
-  padding: 0.4rem 0.3rem;
   width: 2.2rem;
 }
 
