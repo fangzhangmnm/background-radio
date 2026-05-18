@@ -1112,16 +1112,61 @@ for (const r of themeRadios) {
 }
 
 // === Volume ===
+// iOS Safari 的 audio.volume 是只读的(系统硬件键控制)。要做 in-app 音量
+// 必须走 Web Audio API:audio element → createMediaElementSource → GainNode → destination
+// GainNode.gain.value 可以在 iOS 上正常工作。AudioContext 需要在 user gesture 里建。
+let audioContext = null;
+let gainNode = null;
+
+function ensureAudioContext() {
+  if (audioContext) {
+    if (audioContext.state === "suspended") {
+      audioContext.resume().catch(() => {});
+    }
+    return;
+  }
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) {
+      log("AudioContext 不支持,音量只能靠 audio.volume(iOS 上无效)");
+      return;
+    }
+    audioContext = new AC();
+    const src = audioContext.createMediaElementSource(audio);
+    gainNode = audioContext.createGain();
+    gainNode.gain.value = state.volume;
+    src.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    audioContext.resume().catch(() => {});
+    log("AudioContext 已建立,GainNode 接管音量");
+  } catch (e) {
+    log("AudioContext 建立失败:", e.message);
+  }
+}
+
 function applyVolume() {
-  audio.volume = state.volume;
+  audio.volume = state.volume;            // 桌面 + Android 上有效
+  if (gainNode) gainNode.gain.value = state.volume; // iOS 上唯一有效的路径
   volumeBar.value = String(Math.round(state.volume * 100));
 }
 
 volumeBar.addEventListener("input", () => {
   state.volume = Number(volumeBar.value) / 100;
   audio.volume = state.volume;
+  if (gainNode) gainNode.gain.value = state.volume;
 });
 volumeBar.addEventListener("change", saveState);
+
+// 首次 user gesture(任何位置的点击 / 触摸)→ 建 AudioContext。
+// iOS 要求 AudioContext.resume() 在 gesture 里发,不然就 suspended 出不来声。
+// 设置好后所有 audio 播放都走 GainNode,音量滑块才有效。
+function setupAudioContextOnFirstGesture() {
+  ensureAudioContext();
+  document.removeEventListener("click", setupAudioContextOnFirstGesture, true);
+  document.removeEventListener("touchstart", setupAudioContextOnFirstGesture, true);
+}
+document.addEventListener("click", setupAudioContextOnFirstGesture, true);
+document.addEventListener("touchstart", setupAudioContextOnFirstGesture, { capture: true, passive: true });
 
 // === Auth controls ===
 btnLogin.addEventListener("click", async () => {
