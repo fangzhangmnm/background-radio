@@ -189,7 +189,9 @@
     <span id="transient-toast-text" class="update-text"></span>
   </div>
 
-  <div id="tap-overlay" class="tap-overlay" hidden role="button" tabindex="0" aria-label="点击继续播放">
+  <!-- 默认显示(不带 hidden),JS init 完成后再决定要不要藏 —— 这样页面 loading 那一秒就有视觉,
+       而不是等 MSAL + Graph + render 全跑完才出现 -->
+  <div id="tap-overlay" class="tap-overlay" role="button" tabindex="0" aria-label="点击继续播放">
     <div class="tap-glyph">▶</div>
     <div id="tap-title" class="tap-title"></div>
     <div class="tap-hint">轻触屏幕继续</div>

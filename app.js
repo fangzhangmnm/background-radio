@@ -1261,10 +1261,17 @@ function hideTapOverlay() {
 
 // 注意:audio.play() 必须在用户 gesture 同步路径里调,所以不要在 await 后头调
 tapOverlay.addEventListener("click", () => {
+  if (!audio.src) {
+    // 页面刚加载完,init/auth/restoreSession 还没把 audio.src 装好。
+    // 不藏 overlay,让用户晚点再点(或者 restoreSession 完了自动 autoplay 成功就藏)
+    log("audio 还没装载,稍等再点");
+    return;
+  }
   hideTapOverlay();
   audio.play().catch((e) => {
     log("点 overlay 后 play 仍失败:", e.message);
-    // 多半是 src 未就绪;给用户回个失败提示后再让大 ▶ 接管
+    // 再 show 回来,避免锁死
+    tapOverlay.hidden = false;
   });
 });
 
@@ -1300,6 +1307,7 @@ async function restoreSession() {
     }
   } else if (offlineMode) {
     log("offline 且当前曲无缓存,无法 resume play");
+    hideTapOverlay(); // 卡在 overlay 上没意义,直接放用户进 UI 去选别的
     return;
   } else {
     try {
@@ -1318,17 +1326,19 @@ async function restoreSession() {
       }
     } catch (e) {
       log("resume 预拉失败:", e.message);
+      hideTapOverlay();
       return;
     }
   }
 
-  // 试 autoplay。Chrome/Edge PWA 攒了 engagement 会放行;iOS 必拒,这时弹蒙层
+  // 试 autoplay。Chrome/Edge PWA 攒了 engagement 会放行;iOS 必拒,overlay 默认就显示着
   try {
     await audio.play();
     log("autoplay 成功");
+    hideTapOverlay();  // 成功就藏掉
   } catch (e) {
-    log("autoplay 被拒,弹 tap overlay:", e.message);
-    showTapOverlay(displayName(state.currentTrack.name));
+    log("autoplay 被拒,保持 tap overlay 可见:", e.message);
+    // overlay 默认已经显示,title 也在 main() 设过,这里啥都不用做
   }
 }
 
@@ -1337,6 +1347,15 @@ async function main() {
   applyTheme();
   applyModeUi();
   applyVolume();
+
+  // Tap overlay 默认在 HTML 里是显示的;这里决定要不要藏。
+  // 有 currentTrack → 把上次的曲名先写进去(让 loading 期间 overlay 也有意义),保持显示
+  // 没 currentTrack → 直接藏(冷启动,没什么可 resume)
+  if (state.currentTrack) {
+    tapTitleEl.textContent = displayName(state.currentTrack.name);
+  } else {
+    hideTapOverlay();
+  }
 
   log("加载 MSAL...");
   let result;
