@@ -1,116 +1,81 @@
-/* === Palette tokens(default = day:白金;[data-theme="night"] / 系统暗 → 黑金)=== */
+/* === Spec: Ivory-Platinum / Black-Gold. Flat fills only. No gradients. === */
 :root, :root[data-theme="day"], :root[data-theme="auto"] {
   --font: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
 
-  /* DAY · 白金:珍珠白底 + 哑光老黄铜 */
-  --bg-1: #ede2c6;
-  --bg-2: #d8c69a;
-  --bg-tint: #c5b075;
-  --fg: #2a2113;
-  --fg-soft: #806739;
-  --hairline: rgba(135, 100, 40, 0.28);
-  --hover: rgba(255, 248, 222, 0.42);
-  --active: rgba(135, 100, 40, 0.14);
-  --accent: #9c6f24;
-  --accent-soft: #c19654;
-  --glass: rgba(255, 246, 218, 0.40);
-  --glass-strong: rgba(255, 246, 218, 0.65);
-  --shell-glow: radial-gradient(ellipse 110% 80% at 50% 0%,
-                                rgba(255, 252, 235, 0.55) 0%,
-                                rgba(255, 246, 218, 0.0) 70%);
+  /* DAY · 象牙白金 v3 */
+  --bg-canvas: #F6F4EF;
+  --bg-surface: #FFFFFF;
+  --hairline: #E0D6BE;           /* border.gold:champagne 金色细线 */
+  --fg: #2A2620;
+  --fg-soft: #6B6456;
+  --accent: #B7B19F;             /* accent.metal:platinum 填色用 */
+  --accent-deep: #8A8472;        /* accent.deep:icon / hover / emphasis */
+  --on-accent: #2A2620;          /* 填了 accent 的按钮上字色:深字才合规 */
+  --hover: #F1ECDE;              /* 浅暖灰 hover */
+  --active: #E8E0CB;
+  --cover-tint: rgba(246, 244, 239, 0.86);
 }
 
-/* NIGHT · 黑金:纯黑底 + 亮金 + 多点散落金光,模拟金粉飘流 */
 @media (prefers-color-scheme: dark) {
   :root[data-theme="auto"] {
-    --bg-1: #050309;
-    --bg-2: #020104;
-    --bg-tint: #1a1408;
-    --fg: #f4dc92;
-    --fg-soft: #b89060;
-    --hairline: rgba(240, 203, 120, 0.22);
-    --hover: rgba(255, 220, 140, 0.06);
-    --active: rgba(240, 203, 120, 0.14);
-    --accent: #f0cb78;
-    --accent-soft: #d4a657;
-    --glass: rgba(15, 10, 4, 0.50);
-    --glass-strong: rgba(15, 10, 4, 0.70);
-    --shell-glow:
-      radial-gradient(circle at 88% 12%, rgba(240, 203, 120, 0.22), transparent 28%),
-      radial-gradient(circle at 95% 68%, rgba(240, 203, 120, 0.14), transparent 35%),
-      radial-gradient(circle at 10% 90%, rgba(240, 203, 120, 0.10), transparent 40%),
-      radial-gradient(circle at 50% 40%, rgba(240, 203, 120, 0.04), transparent 60%);
-    --ambient-bg:
-      radial-gradient(50vmax 40vmax at 80% 15%, rgba(240, 203, 120, 0.18), transparent 50%),
-      radial-gradient(45vmax 55vmax at 105% 75%, rgba(240, 203, 120, 0.10), transparent 45%),
-      radial-gradient(40vmax 30vmax at -5% 95%, rgba(240, 203, 120, 0.06), transparent 50%),
-      linear-gradient(155deg, var(--bg-1), var(--bg-2));
+    --bg-canvas: #121110;
+    --bg-surface: #1C1B18;
+    --hairline: #33302A;
+    --fg: #EDE7D6;
+    --fg-soft: #9A9176;
+    --accent: #C8A24C;            /* antique gold:icon / accent / 填色 */
+    --accent-deep: #C8A24C;       /* 夜里 deep 与 accent 同 */
+    --on-accent: #121110;
+    --hover: #252220;
+    --active: #2E2A24;
+    --cover-tint: rgba(18, 17, 16, 0.86);
   }
 }
 
 :root[data-theme="night"] {
-  --bg-1: #050309;
-  --bg-2: #020104;
-  --bg-tint: #1a1408;
-  --fg: #f4dc92;
-  --fg-soft: #b89060;
-  --hairline: rgba(240, 203, 120, 0.22);
-  --hover: rgba(255, 220, 140, 0.06);
-  --active: rgba(240, 203, 120, 0.14);
-  --accent: #f0cb78;
-  --accent-soft: #d4a657;
-  --glass: rgba(15, 10, 4, 0.50);
-  --glass-strong: rgba(15, 10, 4, 0.70);
-  --shell-glow:
-    radial-gradient(circle at 88% 12%, rgba(240, 203, 120, 0.22), transparent 28%),
-    radial-gradient(circle at 95% 68%, rgba(240, 203, 120, 0.14), transparent 35%),
-    radial-gradient(circle at 10% 90%, rgba(240, 203, 120, 0.10), transparent 40%),
-    radial-gradient(circle at 50% 40%, rgba(240, 203, 120, 0.04), transparent 60%);
-  --ambient-bg:
-    radial-gradient(50vmax 40vmax at 80% 15%, rgba(240, 203, 120, 0.18), transparent 50%),
-    radial-gradient(45vmax 55vmax at 105% 75%, rgba(240, 203, 120, 0.10), transparent 45%),
-    radial-gradient(40vmax 30vmax at -5% 95%, rgba(240, 203, 120, 0.06), transparent 50%),
-    linear-gradient(155deg, var(--bg-1), var(--bg-2));
-}
-
-/* Day 也设 ambient-bg(沿用之前 .ambient 里的 hardcode 改成 var) */
-:root, :root[data-theme="day"], :root[data-theme="auto"] {
-  --ambient-bg:
-    radial-gradient(50vmax 40vmax at 25% 8%, rgba(255, 245, 200, 0.65), transparent 55%),
-    radial-gradient(60vmax 55vmax at 90% 95%, var(--bg-2), transparent 50%),
-    linear-gradient(155deg, var(--bg-1), var(--bg-2));
+  --bg-canvas: #121110;
+  --bg-surface: #1C1B18;
+  --hairline: #33302A;
+  --fg: #EDE7D6;
+  --fg-soft: #9A9176;
+  --accent: #C8A24C;
+  --accent-deep: #C8A24C;
+  --on-accent: #121110;
+  --hover: #252220;
+  --active: #2E2A24;
+  --cover-tint: rgba(18, 17, 16, 0.86);
 }
 
 * { box-sizing: border-box; }
 
-html, body {
+html, html, body {
   margin: 0;
   padding: 0;
   height: 100%;
   font-family: var(--font);
   color: var(--fg);
-  font-weight: 300;
-  letter-spacing: 0.02em;
+  font-weight: 400;
+  letter-spacing: 0.01em;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
 }
 
 body {
-  background: var(--bg-1);
+  background: var(--bg-canvas);
   min-height: 100dvh;
   position: relative;
   overflow: hidden;
 }
 
-/* 底层柔光 —— 给磨砂面提供有内容可 blur(每主题 override --ambient-bg) */
+/* canvas 是平面色,没渐变;旧 .ambient 留着但只是个底色块 */
 .ambient {
   position: fixed;
-  inset: -10vmax;
+  inset: 0;
   z-index: -1;
-  background: var(--ambient-bg);
+  background: var(--bg-canvas);
 }
 
-/* === 单一磨砂 shell:从顶到 controls 整块,顶部有一道极浅的"被打光"渐变 === */
+/* shell = 抬起的卡片:用 surface 色 vs canvas 拉开层级,纯平 */
 .shell {
   position: relative;
   height: 100dvh;
@@ -118,10 +83,9 @@ body {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  background: var(--shell-glow, transparent), var(--glass);
-  backdrop-filter: blur(28px) saturate(135%);
-  -webkit-backdrop-filter: blur(28px) saturate(135%);
-  box-shadow: 0 0 0 1px var(--hairline);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
 }
 
 /* === Top bar === */
@@ -209,15 +173,7 @@ main {
   background-attachment: local, local;
 }
 
-.browser.has-cover {
-  --cover-tint: rgba(241, 235, 220, 0.86);
-}
-
-@media (prefers-color-scheme: dark) {
-  .browser.has-cover {
-    --cover-tint: rgba(26, 22, 16, 0.86);
-  }
-}
+/* --cover-tint 由 :root 主题定义,无需在这里 override */
 
 .entry-list {
   list-style: none;
@@ -336,7 +292,7 @@ main {
   height: 16px;
   border-radius: 50%;
   background: var(--accent);
-  border: 2px solid var(--bg-1);
+  border: 2px solid var(--bg-surface);
   cursor: pointer;
 }
 #seek-bar::-moz-range-thumb {
@@ -344,7 +300,7 @@ main {
   height: 14px;
   border-radius: 50%;
   background: var(--accent);
-  border: 2px solid var(--bg-1);
+  border: 2px solid var(--bg-surface);
   cursor: pointer;
 }
 
@@ -367,15 +323,15 @@ main {
   background: var(--hairline);
 }
 
-button.ctrl-cell,
-button.ctrl-play-big {
+/* 普通 cell:surface 底 + accent-deep 图标 */
+button.ctrl-cell {
   font-family: inherit;
-  font-weight: 300;
-  background: var(--glass-strong);
+  font-weight: 400;
+  background: var(--bg-surface);
   border: none;
   border-radius: 0;
   padding: 0;
-  color: var(--accent);
+  color: var(--accent-deep);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -385,13 +341,35 @@ button.ctrl-play-big {
   transition: background 0.12s ease;
 }
 
-button.ctrl-cell:hover:not(:disabled),
-button.ctrl-play-big:hover:not(:disabled) {
+/* PLAY 是 spec 里说的"filled button":fill = accent,字 = on-accent(深字) */
+button.ctrl-play-big {
+  font-family: inherit;
+  font-weight: 400;
+  background: var(--accent);
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  color: var(--on-accent);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.18rem;
+  transition: background 0.12s ease;
+}
+
+button.ctrl-cell:hover:not(:disabled) {
   background: var(--hover);
 }
-button.ctrl-cell:active:not(:disabled),
-button.ctrl-play-big:active:not(:disabled) {
+button.ctrl-cell:active:not(:disabled) {
   background: var(--active);
+}
+button.ctrl-play-big:hover:not(:disabled) {
+  background: var(--accent-deep);
+}
+button.ctrl-play-big:active:not(:disabled) {
+  filter: brightness(0.92);
 }
 button:disabled { opacity: 0.35; cursor: not-allowed; }
 
@@ -400,7 +378,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   height: 1.9rem;
 }
 
-/* PLAY 是中间巨大 cell:同样 flat 矩形,SVG 巨大 */
+/* PLAY 是中间巨大 cell:filled,SVG 巨大 */
 .ctrl-play-big svg {
   width: 4.8rem;
   height: 4.8rem;
@@ -415,8 +393,8 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 .ctrl-glyph {
   font-size: 1.95rem;
   line-height: 1;
-  font-weight: 300;
-  color: var(--accent);
+  font-weight: 400;
+  color: var(--accent-deep);
 }
 
 .ctrl-sub {
@@ -427,7 +405,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* === 右侧垂直音量条(本身也是一个 cell)=== */
 .vol-strip {
-  background: var(--glass-strong);
+  background: var(--bg-surface);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -462,14 +440,14 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   height: 14px;
   border-radius: 50%;
   background: var(--accent);
-  border: 2px solid var(--bg-1);
+  border: 2px solid var(--bg-surface);
 }
 .vol-vert::-moz-range-thumb {
   width: 12px;
   height: 12px;
   border-radius: 50%;
   background: var(--accent);
-  border: 2px solid var(--bg-1);
+  border: 2px solid var(--bg-surface);
 }
 
 /* === Menu drawer === */
@@ -495,9 +473,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   width: 86%;
   max-width: 360px;
   z-index: 80;
-  background: var(--glass-strong);
-  backdrop-filter: blur(40px) saturate(135%);
-  -webkit-backdrop-filter: blur(40px) saturate(135%);
+  background: var(--bg-surface);
   border-left: 1px solid var(--hairline);
   transform: translateX(100%);
   transition: transform 0.25s ease-out;
@@ -570,13 +546,13 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 
 button.ghost {
   font-family: inherit;
-  font-weight: 300;
-  background: var(--glass-strong);
+  font-weight: 400;
+  background: var(--bg-canvas);
   border: 1px solid var(--hairline);
   color: var(--fg);
   padding: 0.45rem 0.85rem;
   font-size: 0.85rem;
-  border-radius: 3px;
+  border-radius: 0;
   cursor: pointer;
   transition: background 0.12s ease;
 }
@@ -596,15 +572,16 @@ button.ghost:hover:not(:disabled) { background: var(--hover); }
   gap: 0.4rem;
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--hairline);
-  border-radius: 3px;
+  border-radius: 0;
   cursor: pointer;
-  background: var(--glass);
+  background: var(--bg-canvas);
   font-size: 0.85rem;
   user-select: none;
 }
 .loop-opt:has(input:checked) {
-  background: var(--active);
+  background: var(--accent);
   border-color: var(--accent);
+  color: var(--on-accent);
 }
 .loop-opt input {
   margin: 0;
@@ -657,9 +634,7 @@ button.ghost:hover:not(:disabled) { background: var(--hover); }
   text-align: center;
   cursor: pointer;
   user-select: none;
-  background: rgba(40, 35, 28, 0.32);
-  backdrop-filter: blur(36px) saturate(140%);
-  -webkit-backdrop-filter: blur(36px) saturate(140%);
+  background: rgba(18, 17, 16, 0.86);
   animation: tap-fade-in 0.4s ease-out;
 }
 .tap-overlay[hidden] { display: none; }
@@ -672,7 +647,7 @@ button.ghost:hover:not(:disabled) { background: var(--hover); }
 }
 .tap-title {
   font-size: 1.25rem;
-  font-weight: 300;
+  font-weight: 400;
   word-break: break-word;
   max-width: 80%;
   color: var(--fg);
@@ -707,9 +682,7 @@ button.ghost:hover:not(:disabled) { background: var(--hover); }
   font-size: 0.85rem;
   z-index: 90;
   max-width: calc(100% - 2rem);
-  background: var(--glass-strong);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  background: var(--bg-surface);
   border: 1px solid var(--hairline);
   animation: toast-rise 0.35s ease-out;
 }

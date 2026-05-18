@@ -5,7 +5,7 @@
 // 改了任何 precache 文件之后,bump CACHE_VERSION;activate 会清掉旧 cache。
 // skipWaiting + clients.claim 让新 SW 在下次刷新时立即接管。
 
-const CACHE_VERSION = "v7-2026-05-18-theme-toggle";
+const CACHE_VERSION = "v8-2026-05-18-spec-ivory-platinum";
 const CACHE_NAME = `br-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
