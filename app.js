@@ -6,6 +6,7 @@ import {
   isSignedIn,
   getActiveAccount,
 } from "./auth.js";
+import * as cache from "./cache.js";
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 const STATE_KEY = "br.state";
@@ -28,6 +29,8 @@ const defaultState = {
   positions: {},
   // user-set audio volume, 0..1
   volume: 0.8,
+  // 跨会话:这首曾经被加载过吗?Proposal 的 "首播不存盘、下次重播再 fetch" 触发器
+  everPlayed: {},
 };
 let state = structuredClone(defaultState);
 
@@ -92,6 +95,9 @@ function loadState() {
     }
     if (typeof state.volume !== "number" || state.volume < 0 || state.volume > 1) {
       state.volume = 0.8;
+    }
+    if (!state.everPlayed || typeof state.everPlayed !== "object") {
+      state.everPlayed = {};
     }
   } catch (e) {
     log("loadState 失败:", e.message);
@@ -200,6 +206,18 @@ async function renderBrowser() {
     return;
   }
 
+  // 一次性查所有 audio 文件的 cache 状态(并发)
+  const cacheStatus = new Map();
+  await Promise.all(
+    audios.map(async (a) => {
+      try {
+        cacheStatus.set(a.id, await cache.isCached(a.id));
+      } catch (_) {
+        cacheStatus.set(a.id, false);
+      }
+    })
+  );
+
   folderListEl.innerHTML = "";
   for (const row of rows) {
     const li = document.createElement("li");
@@ -216,14 +234,19 @@ async function renderBrowser() {
         row.item.audio?.duration != null
           ? formatTime(row.item.audio.duration / 1000)
           : "";
+      const isHit = cacheStatus.get(row.item.id);
+      li.dataset.trackId = row.item.id;
       li.innerHTML =
         `<span class="icon">♪</span>` +
         `<span class="name">${escapeHtml(row.item.name)}</span>` +
-        (dur ? `<span class="meta">${dur}</span>` : "");
+        (dur ? `<span class="meta">${dur}</span>` : "") +
+        `<span class="cache-dot" title="${isHit ? '已缓存,长按删除' : ''}"></span>`;
+      if (isHit) li.classList.add("cached");
       if (state.currentTrack && state.currentTrack.id === row.item.id) {
         li.classList.add("active");
       }
       li.addEventListener("click", () => playTrack(row.item));
+      attachLongPress(li, () => handleLongPressDelete(row.item, li));
     }
     folderListEl.appendChild(li);
   }
@@ -245,6 +268,47 @@ async function goUp() {
 // === Playback ===
 function setPlayGlyph() {
   playGlyph.textContent = audio.paused ? "▶" : "❚❚";
+}
+
+// 当前 audio.src 的来源,失败处理 / blob 释放都需要知道
+let currentSrcKind = null; // "blob" | "downloadUrl" | null
+let currentBlobUrl = null;
+let prefetchTriggered = false; // 当前曲是否已触发过下一首 prefetch
+
+function clearBlobUrl() {
+  if (currentBlobUrl) {
+    URL.revokeObjectURL(currentBlobUrl);
+    currentBlobUrl = null;
+  }
+}
+
+// 后台 fetch 整首入库 —— 不阻塞调用方
+async function backgroundCacheTrack(driveItem) {
+  try {
+    if (await cache.isCached(driveItem.id)) return;
+    log(`后台缓存: ${driveItem.name}`);
+    // downloadUrl 可能过期(列目录到现在 >1h),refetch 一次保证新鲜
+    let dl = driveItem["@microsoft.graph.downloadUrl"];
+    try {
+      const fresh = await fetchItem(driveItem.id);
+      dl = fresh["@microsoft.graph.downloadUrl"];
+    } catch (_) {}
+    if (!dl) throw new Error("无 downloadUrl");
+    const resp = await fetch(dl);
+    if (!resp.ok) throw new Error(`fetch ${resp.status}`);
+    const blob = await resp.blob();
+    await cache.set(driveItem.id, blob, {
+      name: driveItem.name,
+      duration: driveItem.audio?.duration
+        ? driveItem.audio.duration / 1000
+        : null,
+    });
+    log(`已缓存: ${driveItem.name} ${cache.formatBytes(blob.size)}`);
+    // 刷新 UI 标记
+    refreshCachedMarkers().catch(() => {});
+  } catch (e) {
+    log(`后台缓存失败 ${driveItem.name}:`, e.message);
+  }
 }
 
 async function playTrack(driveItem, startAt = null) {
@@ -303,20 +367,51 @@ async function playTrack(driveItem, startAt = null) {
     }
   }
 
-  // Set src with downloadUrl, prepare to restore position
-  const dl = driveItem["@microsoft.graph.downloadUrl"];
-  if (!dl) {
-    log("⚠️ 该 item 没有 downloadUrl,试着 refetch...");
-    try {
-      const fresh = await fetchItem(driveItem.id);
-      audio.src = fresh["@microsoft.graph.downloadUrl"];
-    } catch (e) {
-      log("refetch 失败:", e.message);
-      return;
-    }
-  } else {
-    audio.src = dl;
+  // 释放上一首的 blob URL,prefetch flag 重置
+  clearBlobUrl();
+  prefetchTriggered = false;
+
+  // 先查 cache。命中 → blob URL;未命中 → downloadUrl
+  let cachedBlob = null;
+  try {
+    cachedBlob = await cache.getBlob(driveItem.id);
+  } catch (e) {
+    log("cache.getBlob 失败:", e.message);
   }
+
+  if (cachedBlob) {
+    currentBlobUrl = URL.createObjectURL(cachedBlob);
+    audio.src = currentBlobUrl;
+    currentSrcKind = "blob";
+    log(`cache 命中: ${driveItem.name}`);
+    cache.touch(driveItem.id).catch(() => {});
+  } else {
+    const dl = driveItem["@microsoft.graph.downloadUrl"];
+    if (!dl) {
+      log("⚠️ 该 item 没有 downloadUrl,试着 refetch...");
+      try {
+        const fresh = await fetchItem(driveItem.id);
+        audio.src = fresh["@microsoft.graph.downloadUrl"];
+      } catch (e) {
+        log("refetch 失败:", e.message);
+        return;
+      }
+    } else {
+      audio.src = dl;
+    }
+    currentSrcKind = "downloadUrl";
+
+    // "首播不存盘、下次重播再 fetch" —— 用 state.everPlayed 当 2nd-play 触发器
+    if (state.everPlayed[driveItem.id]) {
+      // 之前听过这首 + 这次又点了 + 没缓存 → 背景灌入
+      backgroundCacheTrack(driveItem);
+    }
+  }
+
+  // 记下这首被加载过
+  state.everPlayed[driveItem.id] = true;
+  saveState();
+
   restorePositionOnLoadedMetadata = startAt;
 
   try {
@@ -336,12 +431,112 @@ async function refetchDownloadUrlAndResume() {
     const dl = fresh["@microsoft.graph.downloadUrl"];
     if (!dl) throw new Error("refetch 后仍无 downloadUrl");
     const wasPosition = state.position || audio.currentTime || 0;
+    clearBlobUrl();
     audio.src = dl;
+    currentSrcKind = "downloadUrl";
     restorePositionOnLoadedMetadata = wasPosition;
     await audio.play();
   } catch (e) {
     log("refetch 失败:", e.message);
   }
+}
+
+// === Folder-loop prefetch ===
+// 当前曲剩 < PREFETCH_THRESHOLD_S 秒 + folder loop 模式 → 后台拉下一首入库
+const PREFETCH_THRESHOLD_S = 60;
+function maybePrefetchNext() {
+  if (state.mode !== "folder") return;
+  if (prefetchTriggered) return;
+  if (!trackFolderItems || trackFolderItems.length < 2) return;
+  if (!state.currentTrack) return;
+  const dur = audio.duration;
+  if (!isFinite(dur) || dur <= 0) return;
+  if (dur - audio.currentTime > PREFETCH_THRESHOLD_S) return;
+
+  const idx = trackFolderItems.findIndex((t) => t.id === state.currentTrack.id);
+  if (idx === -1) return;
+  const nextIdx = idx === trackFolderItems.length - 1 ? 0 : idx + 1;
+  const next = trackFolderItems[nextIdx];
+  if (!next) return;
+  prefetchTriggered = true;
+  backgroundCacheTrack(next);
+}
+
+// === Cache UI ===
+async function refreshCachedMarkers() {
+  const lis = folderListEl.querySelectorAll(".entry[data-track-id]");
+  for (const li of lis) {
+    const id = li.dataset.trackId;
+    const hit = await cache.isCached(id);
+    li.classList.toggle("cached", hit);
+    const dot = li.querySelector(".cache-dot");
+    if (dot) dot.title = hit ? "已缓存,长按删除" : "";
+  }
+}
+
+async function handleLongPressDelete(driveItem, li) {
+  if (!(await cache.isCached(driveItem.id))) return;
+  const ok = confirm(`从本地缓存删除「${driveItem.name}」?\n(不影响 OneDrive)`);
+  if (!ok) return;
+  try {
+    // 如果正在播这首 + 当前 src 是 blob,要先恢复 downloadUrl 不然丢了 blob 没东西播
+    if (
+      state.currentTrack?.id === driveItem.id &&
+      currentSrcKind === "blob"
+    ) {
+      log("正在播这首,切回 downloadUrl 再删 cache");
+      const wasPosition = audio.currentTime;
+      const wasPlaying = !audio.paused;
+      clearBlobUrl();
+      const fresh = await fetchItem(driveItem.id);
+      audio.src = fresh["@microsoft.graph.downloadUrl"];
+      currentSrcKind = "downloadUrl";
+      restorePositionOnLoadedMetadata = wasPosition;
+      if (wasPlaying) audio.play().catch(() => {});
+    }
+    await cache.del(driveItem.id);
+    li.classList.remove("cached");
+    log(`已从缓存删除: ${driveItem.name}`);
+  } catch (e) {
+    log("删除失败:", e.message);
+  }
+}
+
+// 简陋但够用的长按:鼠标 / 触摸都接;一旦触发了 long-press,屏蔽紧随的 click
+function attachLongPress(el, handler, ms = 600) {
+  let timer = null;
+  let fired = false;
+  const start = () => {
+    fired = false;
+    timer = setTimeout(() => {
+      fired = true;
+      handler();
+    }, ms);
+  };
+  const cancel = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+  el.addEventListener("touchstart", start, { passive: true });
+  el.addEventListener("touchend", cancel);
+  el.addEventListener("touchcancel", cancel);
+  el.addEventListener("touchmove", cancel);
+  el.addEventListener("mousedown", start);
+  el.addEventListener("mouseup", cancel);
+  el.addEventListener("mouseleave", cancel);
+  el.addEventListener(
+    "click",
+    (e) => {
+      if (fired) {
+        e.stopPropagation();
+        e.preventDefault();
+        fired = false;
+      }
+    },
+    true
+  );
 }
 
 // startAt: 0 = 显式从头(folder auto-advance 用),null = 跟模式决定(用户点 prev/next 用)
@@ -490,7 +685,10 @@ audio.addEventListener("loadedmetadata", () => {
   updateMediaSessionHandlers();
   updateMediaSessionPosition();
 });
-audio.addEventListener("timeupdate", updateSeekDisplay);
+audio.addEventListener("timeupdate", () => {
+  updateSeekDisplay();
+  maybePrefetchNext();
+});
 audio.addEventListener("play", () => {
   setPlayGlyph();
   if (hasMediaSession()) navigator.mediaSession.playbackState = "playing";
@@ -504,9 +702,16 @@ audio.addEventListener("ended", handleEnded);
 audio.addEventListener("error", () => {
   const code = audio.error?.code;
   log(`audio error code=${code} (1=ABORTED 2=NETWORK 3=DECODE 4=SRC_NOT_SUPPORTED)`);
-  // 最可能是 downloadUrl 过期
+  if (currentSrcKind === "blob") {
+    // 缓存 blob 出错(罕见)—— 丢弃,回退 downloadUrl 重播
+    log("blob 失败,丢弃 cache 并 fallback 到 downloadUrl");
+    if (state.currentTrack) cache.del(state.currentTrack.id).catch(() => {});
+  }
+  // downloadUrl 失败最可能是过期;blob 失败 fallback 也走这条
   refetchDownloadUrlAndResume();
 });
+
+window.addEventListener("beforeunload", clearBlobUrl);
 
 function persistPosition() {
   if (!state.currentTrack) return;

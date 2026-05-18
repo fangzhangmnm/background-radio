@@ -5,7 +5,7 @@
 // 改了任何 precache 文件之后,bump CACHE_VERSION;activate 会清掉旧 cache。
 // skipWaiting + clients.claim 让新 SW 在下次刷新时立即接管。
 
-const CACHE_VERSION = "v2-2026-05-18-manifest-ios-edge";
+const CACHE_VERSION = "v3-2026-05-18-idb-cache";
 const CACHE_NAME = `br-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -14,6 +14,7 @@ const PRECACHE_URLS = [
   "./style.css",
   "./app.js",
   "./auth.js",
+  "./cache.js",
   "./config.js",
   "./icon.svg",
   "./icon-192.png",
