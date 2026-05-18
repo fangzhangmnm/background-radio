@@ -1,36 +1,84 @@
-/* === 温暖白金 day mode:白面 + 哑光老黄铜。深一点更"金",但不饱和 === */
-:root {
+/* === Palette tokens(default = day:白金;[data-theme="night"] / 系统暗 → 黑金)=== */
+:root, :root[data-theme="day"], :root[data-theme="auto"] {
   --font: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
 
-  --bg-1: #ece0c2;              /* 白面:暖奶油偏 champagne */
-  --bg-2: #ddc99e;
-  --bg-tint: #c8b478;
-  --fg: #2a2113;                /* 字色暖深棕 */
-  --fg-soft: #7d6437;            /* 副字色 = 老黄铜 */
+  /* DAY · 白金:珍珠白底 + 哑光老黄铜 */
+  --bg-1: #ede2c6;
+  --bg-2: #d8c69a;
+  --bg-tint: #c5b075;
+  --fg: #2a2113;
+  --fg-soft: #806739;
   --hairline: rgba(135, 100, 40, 0.28);
-  --hover: rgba(255, 248, 220, 0.40);
+  --hover: rgba(255, 248, 222, 0.42);
   --active: rgba(135, 100, 40, 0.14);
-  --accent: #946824;             /* 主金:深、哑光老黄铜 */
-  --accent-soft: #b58a44;
+  --accent: #9c6f24;
+  --accent-soft: #c19654;
   --glass: rgba(255, 246, 218, 0.40);
-  --glass-strong: rgba(255, 246, 218, 0.62);
+  --glass-strong: rgba(255, 246, 218, 0.65);
+  --shell-glow: radial-gradient(ellipse 110% 80% at 50% 0%,
+                                rgba(255, 252, 235, 0.55) 0%,
+                                rgba(255, 246, 218, 0.0) 70%);
 }
 
+/* NIGHT · 黑金:纯黑底 + 亮金 + 多点散落金光,模拟金粉飘流 */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg-1: #1a1610;
-    --bg-2: #0f0c07;
-    --bg-tint: #2a2218;
-    --fg: #ece2c4;
-    --fg-soft: #b59e6b;
-    --hairline: rgba(220, 190, 120, 0.14);
-    --hover: rgba(255, 240, 200, 0.04);
-    --active: rgba(220, 190, 120, 0.10);
-    --accent: #d4b56e;
-    --accent-soft: #b89a5e;
-    --glass: rgba(255, 245, 220, 0.04);
-    --glass-strong: rgba(255, 245, 220, 0.06);
+  :root[data-theme="auto"] {
+    --bg-1: #050309;
+    --bg-2: #020104;
+    --bg-tint: #1a1408;
+    --fg: #f4dc92;
+    --fg-soft: #b89060;
+    --hairline: rgba(240, 203, 120, 0.22);
+    --hover: rgba(255, 220, 140, 0.06);
+    --active: rgba(240, 203, 120, 0.14);
+    --accent: #f0cb78;
+    --accent-soft: #d4a657;
+    --glass: rgba(15, 10, 4, 0.50);
+    --glass-strong: rgba(15, 10, 4, 0.70);
+    --shell-glow:
+      radial-gradient(circle at 88% 12%, rgba(240, 203, 120, 0.22), transparent 28%),
+      radial-gradient(circle at 95% 68%, rgba(240, 203, 120, 0.14), transparent 35%),
+      radial-gradient(circle at 10% 90%, rgba(240, 203, 120, 0.10), transparent 40%),
+      radial-gradient(circle at 50% 40%, rgba(240, 203, 120, 0.04), transparent 60%);
+    --ambient-bg:
+      radial-gradient(50vmax 40vmax at 80% 15%, rgba(240, 203, 120, 0.18), transparent 50%),
+      radial-gradient(45vmax 55vmax at 105% 75%, rgba(240, 203, 120, 0.10), transparent 45%),
+      radial-gradient(40vmax 30vmax at -5% 95%, rgba(240, 203, 120, 0.06), transparent 50%),
+      linear-gradient(155deg, var(--bg-1), var(--bg-2));
   }
+}
+
+:root[data-theme="night"] {
+  --bg-1: #050309;
+  --bg-2: #020104;
+  --bg-tint: #1a1408;
+  --fg: #f4dc92;
+  --fg-soft: #b89060;
+  --hairline: rgba(240, 203, 120, 0.22);
+  --hover: rgba(255, 220, 140, 0.06);
+  --active: rgba(240, 203, 120, 0.14);
+  --accent: #f0cb78;
+  --accent-soft: #d4a657;
+  --glass: rgba(15, 10, 4, 0.50);
+  --glass-strong: rgba(15, 10, 4, 0.70);
+  --shell-glow:
+    radial-gradient(circle at 88% 12%, rgba(240, 203, 120, 0.22), transparent 28%),
+    radial-gradient(circle at 95% 68%, rgba(240, 203, 120, 0.14), transparent 35%),
+    radial-gradient(circle at 10% 90%, rgba(240, 203, 120, 0.10), transparent 40%),
+    radial-gradient(circle at 50% 40%, rgba(240, 203, 120, 0.04), transparent 60%);
+  --ambient-bg:
+    radial-gradient(50vmax 40vmax at 80% 15%, rgba(240, 203, 120, 0.18), transparent 50%),
+    radial-gradient(45vmax 55vmax at 105% 75%, rgba(240, 203, 120, 0.10), transparent 45%),
+    radial-gradient(40vmax 30vmax at -5% 95%, rgba(240, 203, 120, 0.06), transparent 50%),
+    linear-gradient(155deg, var(--bg-1), var(--bg-2));
+}
+
+/* Day 也设 ambient-bg(沿用之前 .ambient 里的 hardcode 改成 var) */
+:root, :root[data-theme="day"], :root[data-theme="auto"] {
+  --ambient-bg:
+    radial-gradient(50vmax 40vmax at 25% 8%, rgba(255, 245, 200, 0.65), transparent 55%),
+    radial-gradient(60vmax 55vmax at 90% 95%, var(--bg-2), transparent 50%),
+    linear-gradient(155deg, var(--bg-1), var(--bg-2));
 }
 
 * { box-sizing: border-box; }
@@ -54,18 +102,15 @@ body {
   overflow: hidden;
 }
 
-/* 底层柔光 —— 给磨砂面提供有内容可 blur */
+/* 底层柔光 —— 给磨砂面提供有内容可 blur(每主题 override --ambient-bg) */
 .ambient {
   position: fixed;
   inset: -10vmax;
   z-index: -1;
-  background:
-    radial-gradient(70vmax 60vmax at 20% 5%,  var(--bg-tint), transparent 55%),
-    radial-gradient(80vmax 70vmax at 90% 95%, var(--bg-2),    transparent 50%),
-    linear-gradient(155deg, var(--bg-1), var(--bg-2));
+  background: var(--ambient-bg);
 }
 
-/* === 单一磨砂 shell:从顶到 controls 整块,section 之间细横线 === */
+/* === 单一磨砂 shell:从顶到 controls 整块,顶部有一道极浅的"被打光"渐变 === */
 .shell {
   position: relative;
   height: 100dvh;
@@ -73,7 +118,7 @@ body {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  background: var(--glass);
+  background: var(--shell-glow, transparent), var(--glass);
   backdrop-filter: blur(28px) saturate(135%);
   -webkit-backdrop-filter: blur(28px) saturate(135%);
   box-shadow: 0 0 0 1px var(--hairline);
@@ -282,6 +327,7 @@ main {
   border-radius: 2px;
   outline: none;
   cursor: pointer;
+  accent-color: var(--accent);
 }
 #seek-bar::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -394,37 +440,33 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   color: var(--fg-soft);
 }
 
+/* 垂直 slider:用 writing-mode(现代),iOS 仍以 slider-vertical 兜底;
+   两边都靠 accent-color 染金,thumb pseudo 强制重绘 */
 .vol-vert {
   -webkit-appearance: slider-vertical;
   appearance: slider-vertical;
-  writing-mode: bt-lr; /* Firefox */
-  width: 0.4rem;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 0.5rem;
   flex: 1;
   margin: 0;
   background: var(--hairline);
   border-radius: 2px;
   cursor: pointer;
-}
-/* Chrome 用 writing-mode 实现垂直 */
-@supports not (-webkit-appearance: slider-vertical) {
-  .vol-vert {
-    writing-mode: vertical-lr;
-    direction: rtl;
-    width: 0.4rem;
-  }
+  accent-color: var(--accent);
 }
 .vol-vert::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: var(--accent);
   border: 2px solid var(--bg-1);
 }
 .vol-vert::-moz-range-thumb {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--accent);
   border: 2px solid var(--bg-1);

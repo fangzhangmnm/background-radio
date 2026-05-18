@@ -31,6 +31,8 @@ const defaultState = {
   volume: 0.8,
   // 跨会话:这首曾经被加载过吗?Proposal 的 "首播不存盘、下次重播再 fetch" 触发器
   everPlayed: {},
+  // "auto" | "day" | "night"。inline script 在 CSS 应用前就读出来设了 data-theme
+  theme: "auto",
 };
 let state = structuredClone(defaultState);
 
@@ -64,6 +66,7 @@ const menuBackdrop = $("menu-backdrop");
 const cacheInfoEl = $("cache-info");
 const btnCacheClear = $("btn-cache-clear");
 const loopRadios = document.querySelectorAll('input[name="loop"]');
+const themeRadios = document.querySelectorAll('input[name="theme"]');
 const logEl = $("log");
 
 // === 文件名脱后缀(显示用,内部仍按完整名找文件)===
@@ -118,6 +121,9 @@ function loadState() {
     }
     if (!state.everPlayed || typeof state.everPlayed !== "object") {
       state.everPlayed = {};
+    }
+    if (state.theme !== "day" && state.theme !== "night" && state.theme !== "auto") {
+      state.theme = "auto";
     }
   } catch (e) {
     log("loadState 失败:", e.message);
@@ -842,6 +848,24 @@ for (const r of loopRadios) {
   });
 }
 
+// === Theme ===
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", state.theme);
+  for (const r of themeRadios) {
+    r.checked = r.value === state.theme;
+  }
+}
+
+for (const r of themeRadios) {
+  r.addEventListener("change", () => {
+    if (!r.checked) return;
+    state.theme = r.value;
+    saveState();
+    applyTheme();
+    log(`theme → ${state.theme}`);
+  });
+}
+
 // === Volume ===
 function applyVolume() {
   audio.volume = state.volume;
@@ -986,6 +1010,7 @@ async function restoreSession() {
 
 async function main() {
   loadState();
+  applyTheme();
   applyModeUi();
   applyVolume();
 

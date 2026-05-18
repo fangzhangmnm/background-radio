@@ -13,6 +13,24 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="style.css">
+  <script>
+    // 在 CSS 应用前定好 data-theme,避免页面打开瞬间从 day 闪到 night
+    (function () {
+      try {
+        const raw = localStorage.getItem("br.state");
+        let theme = "auto";
+        if (raw) {
+          const s = JSON.parse(raw);
+          if (s && (s.theme === "day" || s.theme === "night" || s.theme === "auto")) {
+            theme = s.theme;
+          }
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (_) {
+        document.documentElement.setAttribute("data-theme", "auto");
+      }
+    })();
+  </script>
 </head>
 <body>
   <div class="ambient"></div>
@@ -99,6 +117,21 @@
       <div class="menu-row">
         <button id="btn-login" class="ghost">登录</button>
         <button id="btn-logout" class="ghost" hidden>登出</button>
+      </div>
+    </section>
+
+    <section class="menu-section">
+      <h3>主题</h3>
+      <div class="loop-row">
+        <label class="loop-opt">
+          <input type="radio" name="theme" value="auto" checked> <span>跟随系统</span>
+        </label>
+        <label class="loop-opt">
+          <input type="radio" name="theme" value="day"> <span>白金 · 日</span>
+        </label>
+        <label class="loop-opt">
+          <input type="radio" name="theme" value="night"> <span>黑金 · 夜</span>
+        </label>
       </div>
     </section>
 
