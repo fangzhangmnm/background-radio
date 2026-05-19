@@ -740,69 +740,8 @@ button.ghost:hover:not(:disabled) { background: var(--hover); }
   border-radius: 3px;
 }
 
-/* === Tap-to-resume overlay (iOS) === */
-.tap-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1.2rem;
-  padding: 2rem;
-  text-align: center;
-  cursor: pointer;
-  user-select: none;
-  /* 不透明实色,沿用当前主题:Day 用白底,Night 用黑底。
-     之前 86% 透明让下面的封面图(可能带绿)漏出来,被你抓到了 */
-  background: var(--bg-surface);
-  color: var(--fg);
-  animation: tap-fade-in 0.4s ease-out;
-}
-.tap-overlay[hidden] { display: none; }
-
-.tap-glyph {
-  font-size: 4.5rem;
-  line-height: 1;
-  color: var(--accent);
-  animation: tap-pulse 2.4s ease-in-out infinite;
-}
-
-/* loading 态:audio.src 还没装,点了没用,视觉上夯实"还没准备好" */
-.tap-overlay.loading {
-  cursor: wait;
-}
-.tap-overlay.loading .tap-glyph {
-  color: var(--fg-soft);
-  opacity: 0.45;
-  animation: none;
-}
-.tap-overlay.loading .tap-title {
-  opacity: 0.6;
-}
-.tap-title {
-  font-size: 1.25rem;
-  font-weight: 400;
-  word-break: break-word;
-  max-width: 80%;
-  color: var(--fg);
-}
-.tap-hint {
-  color: var(--fg-soft);
-  font-size: 0.85rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-@keyframes tap-fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-@keyframes tap-pulse {
-  0%, 100% { opacity: 0.85; transform: scale(1); }
-  50%      { opacity: 1;    transform: scale(1.08); }
-}
+/* (Tap-to-resume overlay 撤了 —— iOS 的 user-gesture 要求由主播放按钮 #btn-play 满足。
+   audio.src 没装好时 btn-play 被 disabled,装好就解禁。普世播放器模式) */
 
 /* === Update toast === */
 .update-toast {

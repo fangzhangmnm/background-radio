@@ -970,6 +970,7 @@ audio.addEventListener("loadedmetadata", () => {
   updateMediaSessionMetadata();
   updateMediaSessionHandlers();
   updateMediaSessionPosition();
+  enablePlayBtn(); // 兜底:有 metadata 了肯定能放,btn-play 解禁
 });
 audio.addEventListener("timeupdate", updateSeekDisplay);
 audio.addEventListener("play", () => {
@@ -1252,40 +1253,18 @@ btnCacheClear.addEventListener("click", async () => {
 });
 
 // === Init ===
-const tapOverlay = $("tap-overlay");
-const tapTitleEl = $("tap-title");
-const tapHintEl = $("tap-hint");
-
-function showTapOverlay(title) {
-  tapTitleEl.textContent = title;
-  tapOverlay.hidden = false;
+// audio.src 装好后调 enablePlayBtn() —— 解锁主播放按钮(loading 状态结束)
+// 没装好时 btn-play 是 disabled,用户没法点击触发空 play()
+function enablePlayBtn() {
+  btnPlay.disabled = false;
 }
-function hideTapOverlay() {
-  tapOverlay.hidden = true;
+function disablePlayBtn() {
+  btnPlay.disabled = true;
 }
-// audio.src 装好后调一下:摘掉 loading 视觉 + 提示文字换成可点状态
-function markOverlayReady() {
-  tapOverlay.classList.remove("loading");
-  if (tapHintEl) tapHintEl.textContent = "轻触屏幕继续";
-}
-
-// 注意:audio.play() 必须在用户 gesture 同步路径里调,所以不要在 await 后头调
-tapOverlay.addEventListener("click", () => {
-  if (tapOverlay.classList.contains("loading") || !audio.src) {
-    // 还没装载 → cursor 也是 wait,视觉上已经在说"还没好",这里加个 log 兜底
-    log("audio 还没装载,稍等再点");
-    return;
-  }
-  hideTapOverlay();
-  audio.play().catch((e) => {
-    log("点 overlay 后 play 仍失败:", e.message);
-    tapOverlay.hidden = false;
-  });
-});
 
 // 早期 cache resume:在 initAuth / MSAL load 之前就跑。
-// 命中 IDB → 立即 audio.src + markOverlayReady + 尝试 autoplay。
-// 用户冷启动时能 0.5s 内开始播,而不用等 MSAL + Graph(可能 ~2-4s)
+// 命中 IDB → 立即 audio.src 就绪 + 解禁 btn-play + 尝试 autoplay(Windows/Chrome 上会成功)
+// 用户冷启动时能 0.5s 内开始播,而不用等 MSAL + Graph
 async function tryEarlyCacheResume() {
   if (!state.currentTrack) return;
   try {
@@ -1295,7 +1274,7 @@ async function tryEarlyCacheResume() {
     currentBlobUrl = URL.createObjectURL(blob);
     audio.src = currentBlobUrl;
     currentSrcKind = "blob";
-    markOverlayReady();
+    enablePlayBtn();
     restorePositionOnLoadedMetadata =
       state.positions[state.currentTrack.id] ?? state.position ?? 0;
     cache.touch(state.currentTrack.id).catch(() => {});
@@ -1316,15 +1295,11 @@ async function tryEarlyCacheResume() {
           }));
       } catch (_) {}
     }
-    // 试 autoplay。iOS 必拒,等用户点 overlay;桌面 PWA 大概率通
+    // 试 autoplay。Windows/Chrome PWA 攒了 engagement 通常通,iOS 必拒。
+    // 拒了就拒了,btn-play 已 enable,用户点它就行
     audio.play()
-      .then(() => {
-        log("早期 autoplay 成功");
-        hideTapOverlay();
-      })
-      .catch(() => {
-        log("早期 autoplay 被拒,等 tap overlay");
-      });
+      .then(() => log("早期 autoplay 成功"))
+      .catch(() => log("早期 autoplay 被拒,等用户点 ▶"));
   } catch (e) {
     log("早期 cache 检查失败:", e.message);
   }
@@ -1348,17 +1323,16 @@ async function restoreSession() {
   posCurrentEl.textContent = formatTime(state.position);
   log("恢复:", state.currentTrack.name, "@", formatTime(state.position));
 
-  // 先查 cache。命中 → blob URL,立刻可以播;不命中 + online → 拉 downloadUrl;不命中 + offline → 放弃
+  // 先查 cache。命中 → blob URL;不命中 + online → 拉 downloadUrl;不命中 + offline → 放弃
   const blob = await cache.getBlob(state.currentTrack.id).catch(() => null);
   if (blob) {
     currentBlobUrl = URL.createObjectURL(blob);
     audio.src = currentBlobUrl;
     currentSrcKind = "blob";
-    markOverlayReady();
+    enablePlayBtn();
     restorePositionOnLoadedMetadata =
       state.positions[state.currentTrack.id] ?? state.position ?? 0;
     cache.touch(state.currentTrack.id).catch(() => {});
-    // siblings 取自 cache(offline 或在线都先这样,够 prev/next 用)
     if (state.currentTrack.parentFolderId) {
       try {
         const allMeta = await cache.listAllMeta();
@@ -1374,14 +1348,13 @@ async function restoreSession() {
     }
   } else if (offlineMode) {
     log("offline 且当前曲无缓存,无法 resume play");
-    hideTapOverlay(); // 卡在 overlay 上没意义,直接放用户进 UI 去选别的
-    return;
+    return; // btn-play 仍 disabled,用户得在列表里挑别的
   } else {
     try {
       const fresh = await fetchItem(state.currentTrack.id);
       audio.src = fresh["@microsoft.graph.downloadUrl"];
       currentSrcKind = "downloadUrl";
-      markOverlayReady();
+      enablePlayBtn();
       restorePositionOnLoadedMetadata =
         state.positions[state.currentTrack.id] ?? state.position ?? 0;
       if (state.currentTrack.parentFolderId) {
@@ -1394,19 +1367,16 @@ async function restoreSession() {
       }
     } catch (e) {
       log("resume 预拉失败:", e.message);
-      hideTapOverlay();
       return;
     }
   }
 
-  // 试 autoplay。Chrome/Edge PWA 攒了 engagement 会放行;iOS 必拒,overlay 默认就显示着
+  // 试 autoplay。Chrome/Edge PWA 攒了 engagement 会放行;iOS 必拒,用户点 ▶ 就行
   try {
     await audio.play();
     log("autoplay 成功");
-    hideTapOverlay();  // 成功就藏掉
   } catch (e) {
-    log("autoplay 被拒,保持 tap overlay 可见:", e.message);
-    // overlay 默认已经显示,title 也在 main() 设过,这里啥都不用做
+    log("autoplay 被拒,等用户点 ▶:", e.message);
   }
 }
 
@@ -1424,15 +1394,11 @@ async function main() {
   applyModeUi();
   applyVolume();
 
-  // Tap overlay 默认在 HTML 里是显示的。
-  // 有 currentTrack → 立刻把曲名填上,启动早期 cache resume(不等 MSAL/auth)
-  // 没 currentTrack → 直接藏
+  // 有 currentTrack → 把曲名写进 status,启动早期 cache resume(不等 MSAL/auth)
+  // 没 currentTrack → btn-play 已默认 disabled(HTML),用户得先在列表里挑
   if (state.currentTrack) {
-    tapTitleEl.textContent = displayName(state.currentTrack.name);
-    // 早期 cache resume —— 不 await,跟下面的 initAuth 并行跑
-    tryEarlyCacheResume();
-  } else {
-    hideTapOverlay();
+    statusTrackEl.textContent = displayName(state.currentTrack.name);
+    tryEarlyCacheResume(); // 不 await,跟下面的 initAuth 并行跑
   }
 
   log(`T+${Math.round(performance.now())}ms 加载 MSAL...`);
@@ -1477,6 +1443,11 @@ async function main() {
     }
     btnLogin.hidden = false;
     btnLogout.hidden = true;
+    // 即使没登录,也走一次 restoreSession:
+    //   - 早期 cache 已经装好 audio.src → 立即 return
+    //   - 缓存命中(同首之前在线时已缓存) → 仍能放
+    //   - 缓存没命中 → fetchItem 无 token 失败,btn-play 保持 disabled
+    await restoreSession();
   }
 }
 

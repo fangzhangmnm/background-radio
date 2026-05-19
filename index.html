@@ -80,7 +80,7 @@
             </svg>
           </button>
         </div>
-        <button id="btn-play" class="ctrl-play-big paused" title="播放 / 暂停" aria-label="播放或暂停">
+        <button id="btn-play" class="ctrl-play-big paused" title="播放 / 暂停" aria-label="播放或暂停" disabled>
           <svg class="glyph-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <polygon points="8,5 20,12 8,19"/>
           </svg>
@@ -187,14 +187,6 @@
 
   <div id="transient-toast" class="update-toast" hidden role="status" aria-live="polite">
     <span id="transient-toast-text" class="update-text"></span>
-  </div>
-
-  <!-- 默认显示(不带 hidden)+ 默认带 loading class。
-       audio.src 一就绪 JS 就摘掉 loading,视觉从"加载中…"切到"轻触屏幕继续" -->
-  <div id="tap-overlay" class="tap-overlay loading" role="button" tabindex="0" aria-label="点击继续播放">
-    <div class="tap-glyph">▶</div>
-    <div id="tap-title" class="tap-title"></div>
-    <div id="tap-hint" class="tap-hint">加载中…</div>
   </div>
 
   <audio id="audio" preload="metadata"></audio>
