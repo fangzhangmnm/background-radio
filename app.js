@@ -1130,9 +1130,10 @@ volumeBar.addEventListener("change", saveState);
 
 // === Auth controls ===
 btnLogin.addEventListener("click", async () => {
-  log("跳转登录...");
+  log(`T+${Math.round(performance.now())}ms 点了登录按钮`);
   try {
     await signIn();
+    log("signIn() 已发起 loginRedirect");
   } catch (e) {
     log("signIn 失败:", e.message);
   }
