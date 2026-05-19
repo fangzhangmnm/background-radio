@@ -5,8 +5,13 @@
 // 改了任何 precache 文件之后,bump CACHE_VERSION;activate 会清掉旧 cache。
 // skipWaiting + clients.claim 让新 SW 在下次刷新时立即接管。
 
-const CACHE_VERSION = "v21-2026-05-18-revert-webaudio-hide-ios-vol";
+const CACHE_VERSION = "v22-2026-05-19-msal-precache-early-cache";
 const CACHE_NAME = `br-${CACHE_VERSION}`;
+
+// MSAL CDN 也 precache —— iOS 冷启动这条原本要 300-1500ms 拉 ~140KB,
+// 我们 pin 在固定版本上(跟 auth.js 的 MSAL_VERSION 同步),不存在"微软推新版"问题
+const MSAL_VERSION = "3.27.0";
+const MSAL_CDN_PRECACHE = `https://cdn.jsdelivr.net/npm/@azure/msal-browser@${MSAL_VERSION}/lib/msal-browser.min.js`;
 
 const PRECACHE_URLS = [
   "./",
@@ -21,7 +26,16 @@ const PRECACHE_URLS = [
   "./icon-512.png",
   "./apple-touch-icon.png",
   "./manifest.webmanifest",
+  MSAL_CDN_PRECACHE,
 ];
+
+// 任意 MSAL CDN 请求(不止 precache 那条 URL,fallback 到 unpkg 等其它镜像也包)
+// 都让 SW 走 cache-first SWR,而不是 passthrough
+function isMsalCdnRequest(url) {
+  if (url.host !== "cdn.jsdelivr.net" && url.host !== "unpkg.com") return false;
+  if (!url.pathname.includes("/@azure/msal-browser")) return false;
+  return url.pathname.endsWith("/msal-browser.min.js");
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -68,8 +82,9 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);
-  // 跨源(Graph、MSAL CDN、OneDrive 下载)→ passthrough,不 cache(SSOT 原则)
-  if (url.origin !== self.location.origin) return;
+  // 跨源默认 passthrough(Graph metadata、OneDrive audio download 都遵循 SSOT 原则)
+  // 例外:MSAL CDN —— 我们 pin 在固定版本上,等同于一个版控的 vendor lib,可以 cache
+  if (url.origin !== self.location.origin && !isMsalCdnRequest(url)) return;
 
   event.respondWith(
     (async () => {

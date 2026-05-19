@@ -1283,8 +1283,66 @@ tapOverlay.addEventListener("click", () => {
   });
 });
 
+// 早期 cache resume:在 initAuth / MSAL load 之前就跑。
+// 命中 IDB → 立即 audio.src + markOverlayReady + 尝试 autoplay。
+// 用户冷启动时能 0.5s 内开始播,而不用等 MSAL + Graph(可能 ~2-4s)
+async function tryEarlyCacheResume() {
+  if (!state.currentTrack) return;
+  try {
+    const blob = await cache.getBlob(state.currentTrack.id);
+    if (!blob) return;
+    log(`T+${Math.round(performance.now())}ms 早期 cache 命中,跳过等 MSAL`);
+    currentBlobUrl = URL.createObjectURL(blob);
+    audio.src = currentBlobUrl;
+    currentSrcKind = "blob";
+    markOverlayReady();
+    restorePositionOnLoadedMetadata =
+      state.positions[state.currentTrack.id] ?? state.position ?? 0;
+    cache.touch(state.currentTrack.id).catch(() => {});
+    statusTrackEl.textContent = displayName(state.currentTrack.name);
+    statusScopeEl.textContent = state.currentTrack.parentFolderName || "";
+
+    // 从 cache.meta 推同级,prev/next 立刻可用(后续 renderBrowser 完会有更全的 Graph 数据替换)
+    if (state.currentTrack.parentFolderId) {
+      try {
+        const allMeta = await cache.listAllMeta();
+        trackFolderItems = allMeta
+          .filter((m) => m.parentFolderId === state.currentTrack.parentFolderId)
+          .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+          .map((m) => ({
+            id: m.trackId,
+            name: m.name,
+            parentReference: { id: m.parentFolderId, name: m.parentFolderName },
+          }));
+      } catch (_) {}
+    }
+    // 试 autoplay。iOS 必拒,等用户点 overlay;桌面 PWA 大概率通
+    audio.play()
+      .then(() => {
+        log("早期 autoplay 成功");
+        hideTapOverlay();
+      })
+      .catch(() => {
+        log("早期 autoplay 被拒,等 tap overlay");
+      });
+  } catch (e) {
+    log("早期 cache 检查失败:", e.message);
+  }
+}
+
 async function restoreSession() {
   if (!state.currentTrack) return;
+  // 如果早期 cache 已经把 audio.src 装上了,这里 skip 重复工作。
+  // 但顺手用 Graph 把 trackFolderItems 升级成更完整的同级列表(在线时)
+  if (audio.src) {
+    log("restoreSession: audio.src 已就绪(早期 cache),跳过");
+    if (!offlineMode && state.currentTrack.parentFolderId) {
+      listFolder(state.currentTrack.parentFolderId)
+        .then((siblings) => { trackFolderItems = siblings.filter(isAudio); })
+        .catch((e) => log("升级同级列表失败:", e.message));
+    }
+    return;
+  }
   statusTrackEl.textContent = displayName(state.currentTrack.name);
   statusScopeEl.textContent = `恢复 @ ${formatTime(state.position)}`;
   posCurrentEl.textContent = formatTime(state.position);
@@ -1360,21 +1418,24 @@ const IS_IOS =
 if (IS_IOS) document.body.classList.add("no-volume");
 
 async function main() {
+  log(`T+${Math.round(performance.now())}ms main() 开始`);
   loadState();
   applyTheme();
   applyModeUi();
   applyVolume();
 
-  // Tap overlay 默认在 HTML 里是显示的;这里决定要不要藏。
-  // 有 currentTrack → 把上次的曲名先写进去(让 loading 期间 overlay 也有意义),保持显示
-  // 没 currentTrack → 直接藏(冷启动,没什么可 resume)
+  // Tap overlay 默认在 HTML 里是显示的。
+  // 有 currentTrack → 立刻把曲名填上,启动早期 cache resume(不等 MSAL/auth)
+  // 没 currentTrack → 直接藏
   if (state.currentTrack) {
     tapTitleEl.textContent = displayName(state.currentTrack.name);
+    // 早期 cache resume —— 不 await,跟下面的 initAuth 并行跑
+    tryEarlyCacheResume();
   } else {
     hideTapOverlay();
   }
 
-  log("加载 MSAL...");
+  log(`T+${Math.round(performance.now())}ms 加载 MSAL...`);
   let result;
   try {
     result = await initAuth();
@@ -1382,6 +1443,7 @@ async function main() {
     log("auth init 失败:", e.message);
     return;
   }
+  log(`T+${Math.round(performance.now())}ms initAuth 完成,offline=${!!result.offline}, signedIn=${!!result.signedIn}`);
 
   if (result.offline) {
     log("auth 离线模式(MSAL CDN 未加载):", result.msalError || "");
@@ -1390,7 +1452,8 @@ async function main() {
     btnLogin.hidden = true;
     btnLogout.hidden = true;
     userEl.textContent = "离线 · 仅缓存可用";
-    await renderBrowser();
+    // 并行:renderBrowser 不阻塞 restoreSession
+    renderBrowser().catch((e) => log("renderBrowser 失败:", e.message));
     await restoreSession();
     return;
   }
@@ -1400,8 +1463,12 @@ async function main() {
     btnLogin.hidden = true;
     btnLogout.hidden = false;
     log("已登录(本 app 已授权):", result.account.username);
-    await renderBrowser();
+    // renderBrowser 后台跑,不阻塞 restoreSession 的关键路径
+    renderBrowser()
+      .then(() => log(`T+${Math.round(performance.now())}ms renderBrowser 完成`))
+      .catch((e) => log("renderBrowser 失败:", e.message));
     await restoreSession();
+    log(`T+${Math.round(performance.now())}ms restoreSession 完成`);
   } else {
     if (result.probedAccount) {
       log("检测到缓存账号但本 app 未授权,点登录授权:", result.probedAccount.username);
