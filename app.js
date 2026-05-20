@@ -539,13 +539,11 @@ async function playTrack(driveItem, startAt = null) {
     persistPosition();
   }
   // startAt 语义:
-  //   null  → 默认行为:单曲模式从 map 恢复,其它模式从 0
-  //   0     → 显式从头(folder 自动 advance 时用)
+  //   null  → 默认行为:任何模式都从 per-track map 恢复(用户显式动作 = 接着听)
+  //   0     → 显式从头(folder ended 自动 advance 时用,handleEnded 已删过 map 项 → 同样 = 0)
   //   N>0   → 跳到 N(app-open resume 时用)
   if (startAt === null) {
-    startAt = state.mode === "single"
-      ? (state.positions[driveItem.id] ?? 0)
-      : 0;
+    startAt = state.positions[driveItem.id] ?? 0;
   }
 
   log(`load: ${driveItem.name} @ ${startAt}s`);

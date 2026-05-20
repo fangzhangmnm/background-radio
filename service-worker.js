@@ -5,7 +5,7 @@
 // 改了任何 precache 文件之后,bump CACHE_VERSION;activate 会清掉旧 cache。
 // skipWaiting + clients.claim 让新 SW 在下次刷新时立即接管。
 
-const CACHE_VERSION = "v24-2026-05-19-msal-precache-best-effort";
+const CACHE_VERSION = "v25-2026-05-19-unified-resume-position";
 const CACHE_NAME = `br-${CACHE_VERSION}`;
 
 // MSAL CDN 也 precache —— iOS 冷启动这条原本要 300-1500ms 拉 ~140KB,
