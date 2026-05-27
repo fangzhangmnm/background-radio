@@ -6,14 +6,14 @@
 - IDB 缓存设计成**两级共用同一个 cap**:
   - **pinned** —— 用户显式 pin 的曲。**LRU 淘汰跳过**,容量塞不下时**新写入静默 skip**(不挤出 pinned)
   - **非 pinned** —— 自动 / 旁路缓存进来的,按 `lastPlayed` LRU 淘汰
-- **完全 offline 时**(MSAL CDN 拉不到 / Graph 不可达)→ app shell 起来,渲染从 `cache.listAllMeta()` 派生,**只展示已缓存的曲**。不假装能浏览整个 OneDrive。
+- **完全 offline 时**(Graph 不可达 —— MSAL 现在是同源 vendor,SW 精缓存,基本不会"拉不到")→ app shell 起来,渲染从 `cache.listAllMeta()` 派生,**只展示已缓存的曲**。不假装能浏览整个 OneDrive。
 - "Library snapshot" 不另存。直接从 `cache.meta` 派生(只列你 cache 过的曲)。OneDrive 是 SSOT,**不存 OneDrive listing 副本**(invalidate 是坑)。
 
 ## 两层缓存的分工
 
 | 层 | 存什么 | 用什么 | TTL | 失效靠 |
 |---|---|---|---|---|
-| App shell | HTML/JS/CSS/icons/manifest + MSAL.js(钉版本)| SW Cache API | SWR + CACHE_VERSION bump | 改 precache 文件后 bump |
+| App shell | HTML/JS/CSS/icons/manifest + `vendor/msal/`(vendored MSAL.js)| SW Cache API | SWR + CACHE_VERSION bump | 改 precache 文件后 bump |
 | 音频 blob | mp3 字节 | IndexedDB | 无(content-addressed by trackId)| LRU 淘汰 + 用户手动 |
 
 **OneDrive metadata 任何形态都不缓存**(folder listing、downloadUrl、driveItem 属性等)。Passthrough 直连 Graph。
@@ -154,7 +154,7 @@ async function initAuth() {
 }
 ```
 
-MSAL CDN 拉不到 → `result.offline = true` → app 进 cache-only 模式:
+Graph 不可达(或 SW 精缓存出问题导致 MSAL 加载失败,vendor 后罕见) → `result.offline = true` → app 进 cache-only 模式:
 
 ```js
 if (result.offline) {
@@ -188,7 +188,7 @@ async function tryEarlyCacheResume() {
 
 main() 里**先**调 `tryEarlyCacheResume()`(不 await,fire-and-forget),**后**await MSAL / Graph。
 
-iOS 上 MSAL CDN 拉 + silent token probe 可能 1-3 秒,这段时间 cached track 已经 ready 可放。冷启动从"~3s 才能点"降到"~0.5s 就能点"。
+iOS 上 MSAL `<script>` 注入 + parse + silent token probe 仍要几百 ms 到 1 秒(vendor 之后省掉了 CDN 拉的部分,但 parse 和 token probe 没法跳过),这段时间 cached track 已经 ready 可放。冷启动从"几秒才能点"降到"~0.5s 就能点"。
 
 ## 不要做的事(被用户明确拒绝过)
 

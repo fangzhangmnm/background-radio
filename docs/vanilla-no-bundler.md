@@ -4,7 +4,7 @@
 
 - 像这种规模(单页 PWA、几百行 JS)的项目,纯 HTML / JS / CSS + 浏览器原生 ES modules **完全可行**,不需要 Vite / Webpack / 任何 bundler。
 - 调试少一层,部署是"把文件 copy 到任何静态服务器"。
-- 第三方依赖通过 **CDN 懒加载,带 fallback CDN**。不要 `<script src="...">` 单点写死,挂了全 app 起不来。
+- 第三方依赖**整包 vendor 到 `vendor/<lib>/`,SW 精缓存**,懒加载从本地。原最早写的是 CDN 懒加载 + fallback,2026-05-27 翻转 —— 见下面"vendor 第三方库"小节,以及 [msal-v3-spa.md](msal-v3-spa.md) 里"反转决策"那段。
 - 必须有 dev server(`file://` 协议下 ES modules 不工作、Service Worker 不能装、MSAL redirect 不工作)—— Python `http.server` 够用。
 
 ## 何时上 bundler
@@ -29,13 +29,43 @@ app.js                               — 状态 + 渲染 + 业务逻辑
 manifest.webmanifest                 — PWA manifest
 service-worker.js                    — (有则)PWA 离线壳
 icon.svg / icon-*.png                — 图标
+vendor/msal/msal-browser.min.js      — vendored @azure/msal-browser@3.27.0
 ```
 
 8~10 个文件,扫一眼就知道在哪。不需要 src/ public/ build/ 分层。
 
-## CDN 懒加载 + fallback
+## vendor 第三方库 + 懒加载
 
-第三方库不要 vendor 进 repo。CDN 加载,失败 fallback:
+第三方库整包 vendor 到 `vendor/<lib>/`,**懒加载从本地** —— 用户不触发用到的功能就不拉,但拉的时候不依赖外网:
+
+```js
+// MSAL_URL 解析成同源的 vendor 路径
+const MSAL_URL = new URL("./vendor/msal/msal-browser.min.js", import.meta.url).href;
+
+async function loadOnce() {
+  if (window.msal) return window.msal;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = MSAL_URL;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`failed ${MSAL_URL}`));
+    document.head.appendChild(s);
+  });
+  if (!window.msal) throw new Error("lib 加载完但 global 没出现");
+  return window.msal;
+}
+```
+
+为什么不 `<script src="https://cdn.../...">` 写死在 HTML(原本写过、后来改成 CDN 懒加载、最终又改成 vendor 懒加载):
+1. CDN 挂掉的时候整 app 起不来,且不知道为什么
+2. 校园网 / 酒店网 / 移动信号弱时,jsdelivr 和 unpkg 经常被墙或慢到几秒。fallback 跑完用户已经看到"加载失败"了
+3. PWA 装在 homescreen 上,SW 精缓存就是为了不依赖外网。CDN 懒加载等于在最关键的"sign-in"路径上反悔 offline-first 承诺
+
+为什么仍然懒加载(不在 HTML 用 `<script src="./vendor/...">` 同步):用户不点 sign-in 就不需要 MSAL,~300KB 不在主线程上 parse 减少冷启动延迟。SW 精缓存保证拉的时候不走网络。
+
+### 历史:CDN 懒加载 + 双 fallback(已退役)
+
+最初是 `cdn.jsdelivr.net` 主 + `unpkg.com` fallback。下面这套是原始代码,留着是因为 SW 那边还有些"曾经为 CDN 写的"防御代码可以对照理解(见 [service-worker-and-updates.md](service-worker-and-updates.md))。如果未来引入一个新的、暂时不打算 vendor 的库,这套结构能直接拿过去用。
 
 ```js
 const VERSION = "3.27.0";
@@ -43,30 +73,8 @@ const URLS = [
   `https://cdn.jsdelivr.net/npm/@azure/msal-browser@${VERSION}/lib/msal-browser.min.js`,
   `https://unpkg.com/@azure/msal-browser@${VERSION}/lib/msal-browser.min.js`,
 ];
-
-async function loadOnce() {
-  if (window.msal) return window.msal;
-  let lastErr;
-  for (const url of URLS) {
-    try {
-      await new Promise((resolve, reject) => {
-        const s = document.createElement("script");
-        s.src = url;
-        s.onload = resolve;
-        s.onerror = () => reject(new Error(`failed ${url}`));
-        document.head.appendChild(s);
-      });
-      if (window.msal) return window.msal;
-    } catch (e) { lastErr = e; }
-  }
-  throw new Error(`lib 加载失败: ${lastErr.message}`);
-}
+// for (url of URLS) { 拉,挂了换下一条 }
 ```
-
-为什么不 `<script src="...">` 写死在 HTML:
-1. 那个 CDN 挂的话整 app 起不来,且不知道为什么
-2. 没法 fallback
-3. 没法在初始化失败时给用户友好提示
 
 ## ES modules 直接用
 

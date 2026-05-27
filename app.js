@@ -1411,7 +1411,7 @@ async function main() {
   log(`T+${Math.round(performance.now())}ms initAuth 完成,offline=${!!result.offline}, signedIn=${!!result.signedIn}`);
 
   if (result.offline) {
-    log("auth 离线模式(MSAL CDN 未加载):", result.msalError || "");
+    log("auth 离线模式(MSAL 未加载或 Graph 不可达):", result.msalError || "");
     offlineMode = true;
     document.body.classList.add("offline");
     btnLogin.hidden = true;

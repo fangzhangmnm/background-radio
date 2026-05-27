@@ -3,7 +3,7 @@
 ## TL;DR
 
 - SW 用 **cache-first + 后台 revalidate(SWR)**,而不是 cache-only 或 network-first。冷启动用 cache,后台 fetch 跟新版本对比,差异时**通知页面**。
-- 静态 shell(HTML / JS / CSS / icons / manifest)全 precache。**跨源资源默认 passthrough**,除非明确知道是 immutable vendor lib(MSAL.js 钉版本是例外)。
+- 静态 shell(HTML / JS / CSS / icons / manifest / vendor)全 precache。**跨源资源默认 passthrough,无例外**(历史上 MSAL CDN 曾是例外,2026-05-27 vendor 之后已经消化掉)。
 - 热更新 toast 走 **3 条独立通路**,任一触发都弹:
   1. SW 后台 SWR 发现 ETag / content-length 变了 → postMessage `asset-updated`
   2. 注册时发现已有 `registration.waiting` 的新 SW + 当前还有 controller → 立刻弹
@@ -15,7 +15,7 @@
 ## CACHE_VERSION 命名
 
 ```js
-const CACHE_VERSION = "v25-2026-05-19-unified-resume-position";
+const CACHE_VERSION = "v26-2026-05-27-vendor-msal";
 const CACHE_NAME = `br-${CACHE_VERSION}`;
 ```
 
@@ -36,26 +36,39 @@ self.addEventListener("activate", (event) => {
 
 `skipWaiting + claim`:新 SW 一装完立即接管,不用关 tab 重开。但这只决定**SW 自己**的接管,**已经渲染的页面 DOM 不会重新加载**,要 reload 才能用上新 cached assets。
 
-## 防御性 install
+## install 现状(简化版)
 
 ```js
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    const sameOrigin = PRECACHE_URLS.filter((u) => !/^https?:/i.test(u));
-    await cache.addAll(sameOrigin);   // 关键:全部成功才算 install
-    const crossOrigin = PRECACHE_URLS.filter((u) => /^https?:/i.test(u));
-    await Promise.all(crossOrigin.map((u) =>
-      cache.add(u).catch((e) =>
-        console.warn("[SW] precache 失败(忽略):", u, e?.message)
-      )
-    ));
+    await cache.addAll(PRECACHE_URLS);   // 全同源,全部成功才算 install
     await self.skipWaiting();
   })());
 });
 ```
 
-为什么这样:`cache.addAll(crossOriginUrl)` 一旦失败(对方 CORS 抖一下、jsdelivr 短暂 503),**整个 install 失败,SW 不 activate**。用户卡在旧 SW + 旧代码上,体感"什么 update 都没生效"。把跨源单独剥出来 best-effort,失败只是 warn,SW 仍然装上,SWR 在下次实际 fetch 那个 URL 时补 cache。
+精缓存全是同源(包括 `vendor/msal/msal-browser.min.js`),一条 `addAll` 完事。
+
+### 历史:跨源 best-effort 模式(已退役)
+
+当 MSAL 还从 jsdelivr / unpkg 拉时,install 必须分两段:
+
+```js
+const sameOrigin = PRECACHE_URLS.filter((u) => !/^https?:/i.test(u));
+await cache.addAll(sameOrigin);   // 关键:全部成功才算 install
+
+const crossOrigin = PRECACHE_URLS.filter((u) => /^https?:/i.test(u));
+await Promise.all(crossOrigin.map((u) =>
+  cache.add(u).catch((e) =>
+    console.warn("[SW] precache 失败(忽略):", u, e?.message)
+  )
+));
+```
+
+为什么必须分两段:`cache.addAll(crossOriginUrl)` 一旦失败(对方 CORS 抖一下、jsdelivr 短暂 503),**整个 install 失败,SW 不 activate**。用户卡在旧 SW + 旧代码上,体感"什么 update 都没生效"。
+
+把 MSAL vendor 进来之后这个问题从根上消失。**如果未来又要引入跨源 precache,把上面这套抄回来。**
 
 ## SWR fetch handler
 
@@ -65,9 +78,9 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
 
-  // 跨源默认 passthrough(SSOT 原则,不假装能 cache 上游 mutable state)
-  // 例外:MSAL CDN 钉在 MSAL_VERSION 上,等同 vendor lib,可以 cache
-  if (url.origin !== self.location.origin && !isMsalCdnRequest(url)) return;
+  // 跨源默认 passthrough(SSOT 原则,不假装能 cache 上游 mutable state)。
+  // 当前无例外 —— MSAL vendor 进来后是同源资源,走正常 SWR 分支。
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
@@ -187,13 +200,13 @@ self.addEventListener("message", (event) => {
 
 ## 跟普通 cache invalidation 的边界
 
-SW cache 仅限**静态 shell + 你掌控版本的 vendor lib**。所有上游可变数据(Graph metadata、OneDrive listing、用户文件)都 **passthrough**。不要给"加速冷启动"这种理由说服自己 cache 这些 —— 缓存失效永远是坑。
+SW cache 仅限**静态 shell + 你掌控版本的 vendor lib**(目前包括 `vendor/msal/`)。所有上游可变数据(Graph metadata、OneDrive listing、用户文件)都 **passthrough**。不要给"加速冷启动"这种理由说服自己 cache 这些 —— 缓存失效永远是坑。
 
-例外要明确写出来。本项目就一条:MSAL CDN(钉 `MSAL_VERSION`,等同 npm tarball 的版本控制)。
+当前没有跨源例外。曾经有过一条 —— MSAL CDN,2026-05-27 改为本地 vendor 之后消化掉了。如果再想加例外,先问"能不能直接 vendor",vendor 几乎总是更简单。
 
 ## 坑
 
-- **`cache.addAll` 是 all-or-nothing**。一个 URL 失败整批回滚,install 失败,旧 SW 继续工作。这通常**不是你想要的**,把易错的剥成 best-effort。
+- **`cache.addAll` 是 all-or-nothing**。一个 URL 失败整批回滚,install 失败,旧 SW 继续工作。当前 precache 全同源,这反而**正是你想要的**(任一同源资源拿不到就是出问题了,别假装装好了)。当跨源 lib 在 precache 里时,要把易错的剥成 best-effort(见上面"历史"小节)。
 - **同一个 SW 文件 byte 一字不差时,浏览器认为没变**,不触发 update。CI 上偶尔输出有差异(BOM、换行)能"偶然触发"更新,但靠它不稳。每次有意 release 改一下 `CACHE_VERSION` 字符串,逻辑上没影响,但 byte 变了 → 触发更新。
 - **`clients.claim()` 让新 SW 接管已有 page**,但 page 上的 DOM 不会变,只是后续 fetch 会过新 SW。视觉上看不出来,所以新 cached assets 要 page reload 才生效 —— toast + 用户刷新这一套就是为这个。
 - **localhost 跳过 SW** 这条很重要。否则 dev 写代码,F5 看到的是 cache 上一次的版本,会怀疑自己改的没保存,排查掉时间。

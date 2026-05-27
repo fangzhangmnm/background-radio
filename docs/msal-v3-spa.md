@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-- v3 **不在** `alcdn.msauth.net` 上,Microsoft 那个老 CDN 只到 v2。v3 从 jsDelivr / unpkg 拉,且要带 fallback。
+- v3 **不在** `alcdn.msauth.net` 上,Microsoft 那个老 CDN 只到 v2。**当前做法是把 v3 整包 vendor 到 `vendor/msal/`,SW 精缓存** —— 见下面"加载脚本"小节里"反转决策"那段。
 - 用 **`loginRedirect` 不要用 `loginPopup`**。popup 会被各种拦,且在 PWA standalone 下行为更怪。
 - `redirectUri` 字符串必须**和 Azure portal 里登记的完全一致**,包括结尾斜杠。Python `http.server` 服务根目录会让 `location.origin + location.pathname` 带斜杠,所以 portal 里两条都登记是稳妥的:`http://localhost:5173` 和 `http://localhost:5173/`。
 - **缓存账号 ≠ 本 app 已被授权**。MSAL 的 account entity 按 user identity 存,同 origin 不同 clientId 的 app 互相看得见对方的账号。如果直接 `setActiveAccount(getAllAccounts()[0])` 就标"已登录",UI 是骗人的。要做一次 **silent token probe**,silent 拿到本 clientId 的 token 才算真登录。
@@ -10,14 +10,27 @@
 ## 加载脚本
 
 ```js
-const MSAL_VERSION = "3.27.0";
-const MSAL_URLS = [
-  `https://cdn.jsdelivr.net/npm/@azure/msal-browser@${MSAL_VERSION}/lib/msal-browser.min.js`,
-  `https://unpkg.com/@azure/msal-browser@${MSAL_VERSION}/lib/msal-browser.min.js`,
-];
+// vendor/msal/msal-browser.min.js  ← 整包 vendor,~300KB
+const MSAL_URL = new URL("./vendor/msal/msal-browser.min.js", import.meta.url).href;
+
+async function loadMsal() {
+  if (window.msal) return window.msal;
+  await loadScript(MSAL_URL);
+  if (!window.msal) throw new Error("MSAL 加载完但 window.msal 没出现");
+  return window.msal;
+}
 ```
 
-懒加载,失败一条试下一条。一定要 fallback —— 单点 CDN 偶发挂掉时全 app 启动不了。
+懒加载(用户点 sign-in 之前不拉),但只从本地。SW 把 `vendor/msal/msal-browser.min.js` 精缓存,跟其它 shell 资源一起在 `install` 阶段 `addAll`。
+
+**反转决策(2026-05-27)**。最初版本是 jsDelivr 主 + unpkg fallback,理由是"第三方库不要 vendor,版本会漂"。实际跑下来踩了几个坑才翻转:
+
+- 校园网 / 酒店网 / 移动信号弱的地方,jsdelivr / unpkg 经常被墙或慢到几秒。两条 fallback 跑完用户已经看到"MSAL 加载失败"了 —— 明明能上网,只是连不上 npm 镜像。
+- SW 里曾经搞过一套花活:`MSAL_CDN_PRECACHE` best-effort 装进 cache、`isMsalCdnRequest` 在 fetch handler 里把 cross-origin 的 MSAL 当作 SWR 例外。能跑,但比起"vendor + 同源精缓存"复杂得多 —— 而 vendor 之后这一整套都能删掉。
+- MSAL v3 接口稳定,`acquireTokenSilent` / `loginRedirect` 几年没变;PWA 装在 homescreen 上几个月不升级也无所谓。
+- 多 300KB 在 PWA precache 里(本来已经有 icons、style、几个 .js)完全可忽略。
+
+需要升 MSAL 时手动换 `vendor/msal/msal-browser.min.js` 并 bump SW 的 `CACHE_VERSION`。
 
 不要在 HTML 用 `<script src="https://alcdn.msauth.net/browser/3.x/...">`,这个 URL 404。
 

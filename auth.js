@@ -1,10 +1,8 @@
 import { CLIENT_ID, AUTHORITY, SCOPES } from "./config.js";
 
-const MSAL_VERSION = "3.27.0";
-const MSAL_URLS = [
-  `https://cdn.jsdelivr.net/npm/@azure/msal-browser@${MSAL_VERSION}/lib/msal-browser.min.js`,
-  `https://unpkg.com/@azure/msal-browser@${MSAL_VERSION}/lib/msal-browser.min.js`,
-];
+// MSAL v3.27.0 vendor 到 vendor/msal/,SW 精缓存,sign-in 不再依赖 CDN 可达。
+// 反转了原 "第三方库不要 vendor 进 repo" 的决策 —— 见 docs/msal-v3-spa.md。
+const MSAL_URL = new URL("./vendor/msal/msal-browser.min.js", import.meta.url).href;
 
 let pca = null;
 let activeAccount = null;
@@ -23,21 +21,19 @@ function loadScript(url) {
 
 async function loadMsal() {
   if (window.msal) return window.msal;
-  let lastErr = null;
-  for (const url of MSAL_URLS) {
-    try {
-      await loadScript(url);
-      if (window.msal) return window.msal;
-    } catch (e) {
-      lastErr = e;
-    }
+  try {
+    await loadScript(MSAL_URL);
+    if (window.msal) return window.msal;
+    throw new Error("MSAL 加载完但 window.msal 没出现");
+  } catch (e) {
+    throw new Error(`MSAL 加载失败: ${e?.message ?? "unknown"}`);
   }
-  throw new Error(`MSAL 加载失败: ${lastErr?.message ?? "unknown"}`);
 }
 
 // Init 时除了恢复账号身份,还要 silent 试一次拿 token,确认本 app 真的被授权过。
 // 否则缓存账号(可能来自同 origin 的另一个 app)会让 UI 误标"已登录"。
-// 离线场景:MSAL CDN 全失败 → 返回 { offline: true },app 进入只读 / 缓存模式。
+// 离线场景:MSAL 加载失败(vendor 后罕见,可能 SW 精缓存坏了)或 Graph 不可达
+// → 返回 { offline: true },app 进入只读 / 缓存模式。
 export function initAuth() {
   if (initPromise) return initPromise;
   initPromise = (async () => {

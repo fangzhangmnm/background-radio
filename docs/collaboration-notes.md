@@ -138,10 +138,12 @@ commit message 风格:首行 ~60 字符,空行,正文段落讲清楚每条改动
 
 ## 用户允许临时禁止你之前的"原则"
 
-memory 里那条 [[passthrough-over-cache]] 用户主动 amend 过一次("MSAL 也缓存,因为我们 pin 版本")。这种 case:
+memory 里那条 [[passthrough-over-cache]] 用户主动 amend 过一次("MSAL CDN 也缓存,因为我们 pin 版本")。这种 case:
 
 - **承认这是规则修正,记到 memory** —— 在原 memory 文件后面 append 一段 "2026-05-19 amendment: ..." 而不是把原规则改掉。原规则仍然适用 in general,只是开了一个明确的例外
 - **不要把例外扩大化**。"既然 MSAL 能 cache,我把 Graph 也 cache 算了" 不行 —— amendment 是 narrow,只针对 vendor lib
+
+**后续(2026-05-27):那个例外被消化了**。MSAL 整包 vendor 进 `vendor/msal/`,变成同源精缓存,不再是"跨源 SWR 例外"。教训:有时候 amendment 是过渡态,等找到更干净的方案(这里是 vendor),原规则就能恢复纯粹。memory 那条 amendment 现在已经不需要了,可以删 —— 但**用户没让你动 memory 之前不要主动删别人的 memory 记录**(参考你正在阅读的这份 collaboration-notes 的整体精神:用户的 in-progress state 你不要悄悄帮忙清理)。
 
 ## 用户的失败容忍模式
 
