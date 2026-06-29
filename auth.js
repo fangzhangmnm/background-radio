@@ -1,7 +1,7 @@
 import { CLIENT_ID, AUTHORITY, SCOPES } from "./config.js";
 
 // MSAL v3.27.0 vendor 到 vendor/msal/,SW 精缓存,sign-in 不再依赖 CDN 可达。
-// 反转了原 "第三方库不要 vendor 进 repo" 的决策 —— 见 docs/msal-v3-spa.md。
+// 反转了原 "第三方库不要 vendor 进 repo" 的决策 —— 见 docs/20260524-msal-v3-spa.md。
 const MSAL_URL = new URL("./vendor/msal/msal-browser.min.js", import.meta.url).href;
 
 let pca = null;

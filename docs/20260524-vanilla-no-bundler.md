@@ -4,7 +4,7 @@
 
 - 像这种规模(单页 PWA、几百行 JS)的项目,纯 HTML / JS / CSS + 浏览器原生 ES modules **完全可行**,不需要 Vite / Webpack / 任何 bundler。
 - 调试少一层,部署是"把文件 copy 到任何静态服务器"。
-- 第三方依赖**整包 vendor 到 `vendor/<lib>/`,SW 精缓存**,懒加载从本地。原最早写的是 CDN 懒加载 + fallback,2026-05-27 翻转 —— 见下面"vendor 第三方库"小节,以及 [msal-v3-spa.md](msal-v3-spa.md) 里"反转决策"那段。
+- 第三方依赖**整包 vendor 到 `vendor/<lib>/`,SW 精缓存**,懒加载从本地。原最早写的是 CDN 懒加载 + fallback,2026-05-27 翻转 —— 见下面"vendor 第三方库"小节,以及 [20260524-msal-v3-spa.md](20260524-msal-v3-spa.md) 里"反转决策"那段。
 - 必须有 dev server(`file://` 协议下 ES modules 不工作、Service Worker 不能装、MSAL redirect 不工作)—— Python `http.server` 够用。
 
 ## 何时上 bundler
@@ -65,7 +65,7 @@ async function loadOnce() {
 
 ### 历史:CDN 懒加载 + 双 fallback(已退役)
 
-最初是 `cdn.jsdelivr.net` 主 + `unpkg.com` fallback。下面这套是原始代码,留着是因为 SW 那边还有些"曾经为 CDN 写的"防御代码可以对照理解(见 [service-worker-and-updates.md](service-worker-and-updates.md))。如果未来引入一个新的、暂时不打算 vendor 的库,这套结构能直接拿过去用。
+最初是 `cdn.jsdelivr.net` 主 + `unpkg.com` fallback。下面这套是原始代码,留着是因为 SW 那边还有些"曾经为 CDN 写的"防御代码可以对照理解(见 [20260524-service-worker-and-updates.md](20260524-service-worker-and-updates.md))。如果未来引入一个新的、暂时不打算 vendor 的库,这套结构能直接拿过去用。
 
 ```js
 const VERSION = "3.27.0";

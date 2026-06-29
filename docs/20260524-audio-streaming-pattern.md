@@ -91,7 +91,7 @@ const STORE_META  = "meta";     // { trackId, size, type, lastPlayed,
 
 `parentFolderId` / `parentFolderName` 跟 blob 一起存,**为了离线模式从 cache.meta 派生 listing**。
 
-容量 cap 默认 250MB(iOS 友好,长歌 200MB 一首装得下不止一首),用户菜单可改。详见 [offline-and-cache-tiers.md](offline-and-cache-tiers.md)。
+容量 cap 默认 250MB(iOS 友好,长歌 200MB 一首装得下不止一首),用户菜单可改。详见 [20260524-offline-and-cache-tiers.md](20260524-offline-and-cache-tiers.md)。
 
 ## 音频元素事件清单(用得上的)
 

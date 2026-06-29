@@ -1,6 +1,6 @@
 # PWA 图标 — SVG 矢量加 ImageMagick 转 PNG 的现实
 
-> 整篇都是本项目实际 ship 的内容:图标、manifest、SW、GH Pages 自动部署 + 热更新 toast 全套都在线上跑。SW lifecycle 细节单独见 [service-worker-and-updates.md](service-worker-and-updates.md)。
+> 整篇都是本项目实际 ship 的内容:图标、manifest、SW、GH Pages 自动部署 + 热更新 toast 全套都在线上跑。SW lifecycle 细节单独见 [20260524-service-worker-and-updates.md](20260524-service-worker-and-updates.md)。
 
 ## TL;DR
 

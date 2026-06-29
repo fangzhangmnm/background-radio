@@ -1,6 +1,6 @@
 # 个人设计规范 — Ivory-Platinum / Black-Gold
 
-> 这是用户在协作中给出的明确 spec + 一路迭代固化下来的设计纪律。沿用到后续类似项目可以保持视觉一致性。区别于 [theme-system.md](theme-system.md)("怎么实现主题切换"),本文是**"用什么 token 值 + 遵守哪些纪律"**。
+> 这是用户在协作中给出的明确 spec + 一路迭代固化下来的设计纪律。沿用到后续类似项目可以保持视觉一致性。区别于 [20260524-theme-system.md](20260524-theme-system.md)("怎么实现主题切换"),本文是**"用什么 token 值 + 遵守哪些纪律"**。
 
 ## TL;DR
 
@@ -232,7 +232,7 @@ Windows 上默认的灰色 chunky bar 跟暖白金主题完全不搭。**主题�
 ## 把这套搬到新项目的最小步骤
 
 1. 复制 spec(本文 "完整 Spec" 那块)进新项目的 `style.css` 顶部
-2. 复制 [theme-system.md](theme-system.md) 里的 `<head>` inline script,防 FOUC
+2. 复制 [20260524-theme-system.md](20260524-theme-system.md) 里的 `<head>` inline script,防 FOUC
 3. 业务 CSS 一律用 token,不写 hex 色值
 4. 加 menu / settings 里"主题"radio 三选项,持久化 state.theme
 

@@ -23,7 +23,7 @@ const PRECACHE_URLS = [
   "./manifest.webmanifest",
   // MSAL 整包 vendor 到 vendor/msal/,跟其它 shell 资源一起精缓存。
   // 历史上这里是 jsdelivr CDN 的 best-effort precache + cross-origin SWR;
-  // 反转后所有资源都是同源,install 路径只剩一条 addAll。见 docs/msal-v3-spa.md。
+  // 反转后所有资源都是同源,install 路径只剩一条 addAll。见 docs/20260524-msal-v3-spa.md。
   "./vendor/msal/msal-browser.min.js",
 ];
 
