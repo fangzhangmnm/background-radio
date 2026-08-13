@@ -6,3 +6,5 @@ Thumbs.db
 
 # Private project journals (not for source control)
 journal/
+journals/
+.claude/
