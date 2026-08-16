@@ -6,7 +6,7 @@ import { createStore, createOneDriveProvider } from "../../../20260813 internal-
 import { startSwAuthBridge } from "../../../20260813 internal-store/src/sw/bridge.ts";
 import { CLIENT_ID, AUTHORITY, SCOPES } from "../../config.js";
 
-const SPIKE_V = "spike-1 · 2026-08-15";
+const SPIKE_V = "spike-2 · 2026-08-15";
 const APP_ID = "br-spike";
 const DB_NAME = `${APP_ID}.defaultStore`;
 const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -198,7 +198,13 @@ document.getElementById("seed")!.addEventListener("click", async () => {
     try {
       const r = await store.file(name, { isZip: false, mode: "new" }).save(makeWav(secs, freq));
       log(`播种 ${name}：${r.pushed ? "已上云" : `只落本地（${r.reason}）`}`);
-    } catch (e) { log(`播种 ${name} 跳过：${(e as Error).message}`); }
+    } catch {
+      // 撞名（比如上次未登录只落了本地）→ existing 覆盖保存再推（字节 idempotent；登录后重按播种即可补上云）
+      try {
+        const r = await store.file(name, { isZip: false, mode: "existing" }).save(makeWav(secs, freq));
+        log(`播种 ${name}（已有→补推）：${r.pushed ? "已上云" : `仍只在本地（${r.reason}）`}`);
+      } catch (e2) { log(`播种 ${name} 失败：${(e2 as Error).message}`); }
+    }
   }
   watch("spike-test");
 });
@@ -221,21 +227,31 @@ function makeWav(secs: number, freq: number): Uint8Array {
 
 // ── boot ────────────────────────────────────────────────────────────────
 document.getElementById("ver")!.textContent = SPIKE_V;
+let booted = false;
+function proceedSignedIn(): void {
+  if (booted) return;
+  booted = true;
+  log(`已登录：${String((auth.getActiveAccount() as { username?: string })?.username ?? "")}`);
+  document.getElementById("login")!.hidden = true;
+  startSwAuthBridge({ dbName: DB_NAME, getToken: () => auth.getToken() });   // 三层堵洞①：页面活着就续凭据给 SW
+  watch("");
+}
 (async () => {
   log(`BR v2 ${SPIKE_V} 启动`);
   await ensureSw();
   const st = await auth.initAuth();
-  if (!st.signedIn) {
-    const ok = await auth.retrySilentSignIn();
-    if (!ok) {
-      log("未登录：优先去旧 BR 页登录一次再回来（同 clientId 静默复用）；或点下面按钮交互登录");
-      const btn = document.getElementById("login")!;
-      btn.hidden = false;
-      btn.addEventListener("click", () => void auth.signIn());
-      return;
-    }
-  }
-  log(`已登录：${String((auth.getActiveAccount() as { username?: string })?.username ?? "")}`);
-  startSwAuthBridge({ dbName: DB_NAME, getToken: () => auth.getToken() });   // 三层堵洞①：页面活着就续凭据给 SW
-  watch("");
+  if (st.signedIn || await auth.retrySilentSignIn()) { proceedSignedIn(); return; }
+  // 未登录。spike 页交互登录必死（本页 URL 没在 Azure 注册 redirectUri）→ 唯一正路 = 旧 BR 页登录 + 本页静默复用。
+  log("未登录：点下面按钮开旧 BR 页登录一次，回本页后会自动接上（同 clientId 静默复用）");
+  const btn = document.getElementById("login")!;
+  btn.textContent = "去旧 BR 登录（登录完回本页）";
+  btn.hidden = false;
+  btn.addEventListener("click", () => { window.open("../", "_blank"); });
+  const retry = async (): Promise<void> => {
+    if (booted) return;
+    if (await auth.retrySilentSignIn()) { log("检测到登录态，接上了"); proceedSignedIn(); }
+  };
+  addEventListener("focus", () => void retry());
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) void retry(); });
+  watch("");   // 未登录也先给本地帧（播种过的本地文件能看、能播——SW 本地面已修）
 })();

@@ -4069,7 +4069,7 @@ var AUTHORITY2 = "https://login.microsoftonline.com/common";
 var SCOPES2 = ["Files.ReadWrite.AppFolder", "offline_access"];
 
 // src/main.ts
-var SPIKE_V = "spike-1 \xB7 2026-08-15";
+var SPIKE_V = "spike-2 \xB7 2026-08-15";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -4289,8 +4289,13 @@ document.getElementById("seed").addEventListener("click", async () => {
     try {
       const r = await store.file(name, { isZip: false, mode: "new" }).save(makeWav(secs, freq));
       log(`\u64AD\u79CD ${name}\uFF1A${r.pushed ? "\u5DF2\u4E0A\u4E91" : `\u53EA\u843D\u672C\u5730\uFF08${r.reason}\uFF09`}`);
-    } catch (e) {
-      log(`\u64AD\u79CD ${name} \u8DF3\u8FC7\uFF1A${e.message}`);
+    } catch {
+      try {
+        const r = await store.file(name, { isZip: false, mode: "existing" }).save(makeWav(secs, freq));
+        log(`\u64AD\u79CD ${name}\uFF08\u5DF2\u6709\u2192\u8865\u63A8\uFF09\uFF1A${r.pushed ? "\u5DF2\u4E0A\u4E91" : `\u4ECD\u53EA\u5728\u672C\u5730\uFF08${r.reason}\uFF09`}`);
+      } catch (e2) {
+        log(`\u64AD\u79CD ${name} \u5931\u8D25\uFF1A${e2.message}`);
+      }
     }
   }
   watch("spike-test");
@@ -4323,21 +4328,40 @@ function makeWav(secs, freq) {
   return new Uint8Array(buf);
 }
 document.getElementById("ver").textContent = SPIKE_V;
+var booted = false;
+function proceedSignedIn() {
+  if (booted) return;
+  booted = true;
+  log(`\u5DF2\u767B\u5F55\uFF1A${String(auth.getActiveAccount()?.username ?? "")}`);
+  document.getElementById("login").hidden = true;
+  startSwAuthBridge({ dbName: DB_NAME, getToken: () => auth.getToken() });
+  watch("");
+}
 (async () => {
   log(`BR v2 ${SPIKE_V} \u542F\u52A8`);
   await ensureSw();
   const st = await auth.initAuth();
-  if (!st.signedIn) {
-    const ok = await auth.retrySilentSignIn();
-    if (!ok) {
-      log("\u672A\u767B\u5F55\uFF1A\u4F18\u5148\u53BB\u65E7 BR \u9875\u767B\u5F55\u4E00\u6B21\u518D\u56DE\u6765\uFF08\u540C clientId \u9759\u9ED8\u590D\u7528\uFF09\uFF1B\u6216\u70B9\u4E0B\u9762\u6309\u94AE\u4EA4\u4E92\u767B\u5F55");
-      const btn = document.getElementById("login");
-      btn.hidden = false;
-      btn.addEventListener("click", () => void auth.signIn());
-      return;
-    }
+  if (st.signedIn || await auth.retrySilentSignIn()) {
+    proceedSignedIn();
+    return;
   }
-  log(`\u5DF2\u767B\u5F55\uFF1A${String(auth.getActiveAccount()?.username ?? "")}`);
-  startSwAuthBridge({ dbName: DB_NAME, getToken: () => auth.getToken() });
+  log("\u672A\u767B\u5F55\uFF1A\u70B9\u4E0B\u9762\u6309\u94AE\u5F00\u65E7 BR \u9875\u767B\u5F55\u4E00\u6B21\uFF0C\u56DE\u672C\u9875\u540E\u4F1A\u81EA\u52A8\u63A5\u4E0A\uFF08\u540C clientId \u9759\u9ED8\u590D\u7528\uFF09");
+  const btn = document.getElementById("login");
+  btn.textContent = "\u53BB\u65E7 BR \u767B\u5F55\uFF08\u767B\u5F55\u5B8C\u56DE\u672C\u9875\uFF09";
+  btn.hidden = false;
+  btn.addEventListener("click", () => {
+    window.open("../", "_blank");
+  });
+  const retry = async () => {
+    if (booted) return;
+    if (await auth.retrySilentSignIn()) {
+      log("\u68C0\u6D4B\u5230\u767B\u5F55\u6001\uFF0C\u63A5\u4E0A\u4E86");
+      proceedSignedIn();
+    }
+  };
+  addEventListener("focus", () => void retry());
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) void retry();
+  });
   watch("");
 })();

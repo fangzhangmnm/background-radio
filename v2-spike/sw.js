@@ -218,14 +218,14 @@
     async function handle(req) {
       const url = new URL(req.url);
       const name = decodeURIComponent(url.pathname.slice(cfg.streamPrefix.length));
-      const item = await resolve(name);
-      if (!item) return new Response("\u672A\u627E\u5230\uFF08\u672A\u767B\u5F55\u6216\u4E91\u7AEF\u65E0\u6B64\u6587\u4EF6\uFF09", { status: 404 });
       let full = null;
       try {
         const r = await bs.partition("files").get(name);
         if (r) full = r.blob;
       } catch {
       }
+      const item = full ? null : await resolve(name);
+      if (!full && !item) return new Response("\u672A\u627E\u5230\uFF08\u672A\u767B\u5F55\u6216\u4E91\u7AEF\u65E0\u6B64\u6587\u4EF6\uFF09", { status: 404 });
       const size = full ? full.size : item.size;
       const ct = cfg.contentType?.(name) ?? "application/octet-stream";
       const baseHeaders = { "Accept-Ranges": "bytes", "Content-Type": ct, "Cache-Control": "no-store" };
