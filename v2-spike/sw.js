@@ -181,10 +181,11 @@
       return r;
     }
     async function freshUrl(name, id) {
-      let j = await graphJson(`/me/drive/items/${id}?$select=id,@microsoft.graph.downloadUrl`);
+      let j = await graphJson(`/me/drive/items/${id}`);
       if (typeof j?.["@microsoft.graph.downloadUrl"] !== "string") {
-        slog(`items/{id} \u672A\u7ED9 downloadUrl \u2192 \u6309\u8DEF\u5F84\u515C\u5E95\uFF1A${name}`);
-        j = await graphJson(`/me/drive/special/approot:/${encodePath(name)}?$select=id,@microsoft.graph.downloadUrl`);
+        if (j) slog(`items/{id} \u54CD\u5E94\u65E0 downloadUrl\uFF08\u952E\uFF1A${Object.keys(j).slice(0, 12).join(",")}\uFF09\u2192 \u6309\u8DEF\u5F84\u515C\u5E95`);
+        j = await graphJson(`/me/drive/special/approot:/${encodePath(name)}`);
+        if (j && typeof j["@microsoft.graph.downloadUrl"] !== "string") slog(`\u8DEF\u5F84\u515C\u5E95\u4E5F\u65E0 downloadUrl\uFF08\u952E\uFF1A${Object.keys(j).slice(0, 12).join(",")}\uFF09`);
       }
       const u = j?.["@microsoft.graph.downloadUrl"];
       if (typeof u !== "string") return null;
