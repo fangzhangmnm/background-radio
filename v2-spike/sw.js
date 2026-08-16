@@ -260,54 +260,28 @@
       const ct = cfg.contentType?.(name) ?? "application/octet-stream";
       const baseHeaders = { "Accept-Ranges": "bytes", "Content-Type": ct, "Cache-Control": "no-store" };
       const range = parseRange(req.headers.get("Range"), size) ?? { start: 0, end: null };
-      if (range.end != null) {
-        const start2 = range.start, end2 = range.end;
-        let body;
-        if (full) body = new Uint8Array(await full.slice(start2, end2 + 1).arrayBuffer());
-        else {
-          const i02 = Math.floor(start2 / chunkBytes), i1 = Math.floor(end2 / chunkBytes);
-          const parts2 = [];
-          for (let i = i02; i <= i1; i++) parts2.push(await getChunk(name, item, i));
-          const buf2 = new Uint8Array(end2 - start2 + 1);
-          let w2 = 0;
-          for (let i = i02; i <= i1; i++) {
-            const c = parts2[i - i02], cs = i * chunkBytes;
-            const from = Math.max(start2, cs) - cs, to = Math.min(end2 + 1, cs + c.length) - cs;
-            buf2.set(c.subarray(from, to), w2);
-            w2 += to - from;
-          }
-          body = buf2;
-        }
-        return new Response(body, {
-          status: 206,
-          headers: { ...baseHeaders, "Content-Range": `bytes ${start2}-${end2}/${size}`, "Content-Length": String(end2 - start2 + 1) }
-        });
-      }
-      const start = range.start;
-      if (full) {
-        const sliced = full.slice(start);
-        return new Response(sliced.stream(), {
-          status: start > 0 || req.headers.get("Range") ? 206 : 200,
-          headers: start > 0 || req.headers.get("Range") ? { ...baseHeaders, "Content-Range": `bytes ${start}-${size - 1}/${size}`, "Content-Length": String(size - start) } : { ...baseHeaders, "Content-Length": String(size) }
-        });
-      }
       const WINDOW_CHUNKS = 2;
-      const i0 = Math.floor(start / chunkBytes);
-      const end = Math.min(size - 1, (i0 + WINDOW_CHUNKS) * chunkBytes - 1);
-      const parts = [];
-      for (let i = i0; i <= Math.floor(end / chunkBytes); i++) parts.push(await getChunk(name, item, i));
-      const buf = new Uint8Array(end - start + 1);
-      let w = 0;
-      for (let i = i0; i <= Math.floor(end / chunkBytes); i++) {
-        const c = parts[i - i0], cs = i * chunkBytes;
-        const from = Math.max(start, cs) - cs, to = Math.min(end + 1, cs + c.length) - cs;
-        buf.set(c.subarray(from, to), w);
-        w += to - from;
-      }
-      slog(`\u7B54\u7A97\u53E3 206\uFF1Abytes ${start}-${end}/${size}\uFF08${buf.length}B\uFF09`);
-      return new Response(buf, {
+      const start = range.start;
+      const end = range.end ?? Math.min(size - 1, (Math.floor(start / chunkBytes) + WINDOW_CHUNKS) * chunkBytes - 1);
+      const readWindow = async () => {
+        if (full) return new Uint8Array(await full.slice(start, end + 1).arrayBuffer());
+        const i0 = Math.floor(start / chunkBytes), i1 = Math.floor(end / chunkBytes);
+        const buf = new Uint8Array(end - start + 1);
+        let w = 0;
+        for (let i = i0; i <= i1; i++) {
+          const c = await getChunk(name, item, i);
+          const cs = i * chunkBytes;
+          const from = Math.max(start, cs) - cs, to = Math.min(end + 1, cs + c.length) - cs;
+          buf.set(c.subarray(from, to), w);
+          w += to - from;
+        }
+        return buf;
+      };
+      const body = await readWindow();
+      slog(`\u7B54 206\uFF1Abytes ${start}-${end}/${size}\uFF08${body.length}B\uFF0C${full ? "\u672C\u5730" : "\u4E91\u7AEF"}\uFF09`);
+      return new Response(body, {
         status: 206,
-        headers: { ...baseHeaders, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": String(buf.length) }
+        headers: { ...baseHeaders, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": String(body.length) }
       });
     }
     return { matches, handle };

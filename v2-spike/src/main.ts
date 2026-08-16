@@ -6,7 +6,7 @@ import { createStore, createOneDriveProvider } from "../../../20260813 internal-
 import { startSwAuthBridge } from "../../../20260813 internal-store/src/sw/bridge.ts";
 import { CLIENT_ID, AUTHORITY, SCOPES } from "../../config.js";
 
-const SPIKE_V = "spike-5 · 2026-08-15";
+const SPIKE_V = "spike-6 · 2026-08-15";
 const APP_ID = "br-spike";
 const DB_NAME = `${APP_ID}.defaultStore`;
 const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
