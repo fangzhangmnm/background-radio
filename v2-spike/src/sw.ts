@@ -4,10 +4,15 @@ import { createSwStreamGateway } from "../../../20260813 internal-store/src/sw/g
 
 const sw = self as unknown as ServiceWorkerGlobalScope;
 const MIME: Record<string, string> = { mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac", ogg: "audio/ogg" };
+// SW 日志广播到所有页面（spike 仪表：页面日志区显示 [SW] 行——真机黑盒开天窗）
+function swLog(msg: string): void {
+  void sw.clients.matchAll({ includeUncontrolled: true }).then((cs) => { for (const c of cs) c.postMessage({ br2log: msg }); });
+}
 const gw = createSwStreamGateway({
   dbName: "br-spike.defaultStore",
   streamPrefix: new URL("./stream/", sw.registration.scope).pathname,
   contentType: (n) => MIME[n.split(".").pop()!.toLowerCase()] ?? "application/octet-stream",   // 内容知识在 app 侧（store 网关保持内容盲）
+  onLog: swLog,
 });
 
 sw.addEventListener("install", () => { void sw.skipWaiting(); });

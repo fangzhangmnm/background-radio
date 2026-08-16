@@ -3295,9 +3295,11 @@ function createStore(config) {
           close: () => sess.close()
         };
       },
-      offload() {
-        return offloadMod.offload(name);
+      async offload() {
+        await offloadMod.offload(name);
+        notifyFolderOf(name);
       },
+      // 成功后重画本夹（badge 即时 → cloud-only）
       isEncrypted() {
         return encIsEncrypted(name);
       },
@@ -4044,7 +4046,7 @@ function startSwAuthBridge(cfg) {
     } catch {
     }
   }
-  void refresh();
+  const ready = refresh();
   const timer = setInterval(() => {
     void refresh();
   }, cfg.refreshEveryMs ?? 35 * 6e4);
@@ -4053,7 +4055,7 @@ function startSwAuthBridge(cfg) {
   };
   addEventListener("focus", onWake);
   addEventListener("online", onWake);
-  return (opts) => {
+  const stop = (opts) => {
     stopped = true;
     clearInterval(timer);
     removeEventListener("focus", onWake);
@@ -4061,6 +4063,7 @@ function startSwAuthBridge(cfg) {
     if (opts?.wipe) void bridge.del("token").catch(() => {
     });
   };
+  return { ready, stop };
 }
 
 // ../config.js
@@ -4069,7 +4072,7 @@ var AUTHORITY2 = "https://login.microsoftonline.com/common";
 var SCOPES2 = ["Files.ReadWrite.AppFolder", "offline_access"];
 
 // src/main.ts
-var SPIKE_V = "spike-3 \xB7 2026-08-15";
+var SPIKE_V = "spike-4 \xB7 2026-08-15";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -4347,13 +4350,18 @@ function makeWav(secs, freq) {
   return new Uint8Array(buf);
 }
 document.getElementById("ver").textContent = SPIKE_V;
+navigator.serviceWorker.addEventListener("message", (e) => {
+  const m = e.data?.br2log;
+  if (m) log(`[SW] ${m}`);
+});
 var booted = false;
 function proceedSignedIn() {
   if (booted) return;
   booted = true;
   log(`\u5DF2\u767B\u5F55\uFF1A${String(auth.getActiveAccount()?.username ?? "")}`);
   document.getElementById("login").hidden = true;
-  startSwAuthBridge({ dbName: DB_NAME, getToken: () => auth.getToken() });
+  const bridge = startSwAuthBridge({ dbName: DB_NAME, getToken: () => auth.getToken() });
+  void bridge.ready.then(() => log("\u51ED\u636E\u6865\u5C31\u7EEA\uFF08SW \u53EF\u53D6 token\uFF09"));
   void store.files.drainOfflineQueue().then(() => log("\u79BB\u7EBF\u8865\u63A8\u961F\u5217\u5DF2\u6392\u7A7A")).catch((e) => log(`\u8865\u63A8\u5F02\u5E38\uFF1A${e.message}`));
   watch("");
 }

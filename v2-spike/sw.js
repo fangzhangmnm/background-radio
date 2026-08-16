@@ -109,6 +109,12 @@
   }
   function createSwStreamGateway(cfg) {
     const chunkBytes = cfg.chunkBytes ?? CHUNK_DEFAULT;
+    const slog = (m) => {
+      try {
+        cfg.onLog?.(m);
+      } catch {
+      }
+    };
     const bs = createPartitionedBlobStore(cfg.dbName);
     const staging = bs.partition("staging");
     const dirIdx = bs.partition("dir-index-cache");
@@ -145,13 +151,19 @@
           if (f?.id && typeof f.size === "number" && f.eTag) {
             const r2 = { id: f.id, size: f.size, eTag: f.eTag };
             resolveCache.set(name, r2);
+            slog(`\u89E3\u6790 ${name} \u2190 dir-index-cache\uFF08id=${f.id.slice(0, 8)}\u2026 size=${f.size}\uFF09`);
             return r2;
           }
+          slog(`dir-index-cache \u6709\u5939\u8BB0\u5F55\u4F46\u65E0 ${name} \u6761\u76EE \u2192 \u8D70 Graph`);
         }
       } catch {
       }
       const j = await graphJson(`/me/drive/special/approot:/${encodePath(name)}?$select=id,size,eTag,@microsoft.graph.downloadUrl`);
-      if (!j || typeof j.id !== "string") return null;
+      if (!j || typeof j.id !== "string") {
+        slog(`\u89E3\u6790 ${name} \u5931\u8D25\uFF08Graph \u515C\u5E95\u4E5F\u6CA1\u62FF\u5230\uFF1Btoken=${await getToken() ? "\u6709" : "\u65E0"}\uFF09`);
+        return null;
+      }
+      slog(`\u89E3\u6790 ${name} \u2190 Graph\uFF08size=${j.size}\uFF09`);
       const r = { id: j.id, size: j.size ?? 0, eTag: j.eTag ?? "" };
       if (typeof j["@microsoft.graph.downloadUrl"] === "string") urlCache.set(name, j["@microsoft.graph.downloadUrl"]);
       resolveCache.set(name, r);
@@ -172,14 +184,17 @@
       const job = (async () => {
         try {
           const c = await staging.get(`chunk:${name}:${i}`);
-          if (c) return new Uint8Array(await c.blob.arrayBuffer());
+          if (c) {
+            slog(`\u5206\u7247 ${i} \u2190 staging`);
+            return new Uint8Array(await c.blob.arrayBuffer());
+          }
         } catch {
         }
         const off = i * chunkBytes;
         const len = Math.min(chunkBytes, item.size - off);
         const doFetch = async (url2) => fetch(url2, { headers: { Range: `bytes=${off}-${off + len - 1}` } });
         let url = urlCache.get(name) ?? await freshUrl(name, item.id);
-        if (!url) throw new Error(`\u65E0\u51ED\u636E/\u53D6\u4E0D\u5230 downloadUrl\uFF1A${name}`);
+        if (!url) throw new Error(`\u65E0\u51ED\u636E/\u53D6\u4E0D\u5230 downloadUrl\uFF08token=${await getToken() ? "\u6709" : "\u65E0"}\uFF09\uFF1A${name}`);
         let resp = await doFetch(url);
         if (resp.status === 401 || resp.status === 403 || resp.status === 404) {
           url = await freshUrl(name, item.id);
@@ -188,6 +203,7 @@
         }
         if (!resp.ok && resp.status !== 206) throw new Error(`range \u62C9\u53D6\u5931\u8D25 ${resp.status}\uFF1A${name}`);
         const bytes = new Uint8Array(await resp.arrayBuffer());
+        slog(`\u5206\u7247 ${i} \u2190 \u4E91\u7AEF\uFF08${bytes.length}B\uFF0CHTTP ${resp.status}\uFF09`);
         try {
           await staging.put(`chunk:${name}:${i}`, { blob: new Blob([bytes]), updatedAt: Date.now() });
           const mrec = await staging.get(`meta:${name}`);
@@ -216,16 +232,30 @@
       return url.pathname.startsWith(cfg.streamPrefix);
     }
     async function handle(req) {
+      try {
+        return await handleInner(req);
+      } catch (e) {
+        const msg = String(e?.message ?? e);
+        slog(`\u{1F6D1} \u7F51\u5173\u9519\u8BEF\uFF1A${msg}`);
+        return new Response(`\u7F51\u5173\u9519\u8BEF\uFF1A${msg}`, { status: 502 });
+      }
+    }
+    async function handleInner(req) {
       const url = new URL(req.url);
       const name = decodeURIComponent(url.pathname.slice(cfg.streamPrefix.length));
+      slog(`\u8BF7\u6C42 ${name}\uFF08Range: ${req.headers.get("Range") ?? "\u65E0"}\uFF09`);
       let full = null;
       try {
         const r = await bs.partition("files").get(name);
         if (r) full = r.blob;
       } catch {
       }
+      if (full) slog(`${name} \u2190 \u672C\u5730\u6B63\u5F0F\u526F\u672C\uFF08${full.size}B\uFF09`);
       const item = full ? null : await resolve(name);
-      if (!full && !item) return new Response("\u672A\u627E\u5230\uFF08\u672A\u767B\u5F55\u6216\u4E91\u7AEF\u65E0\u6B64\u6587\u4EF6\uFF09", { status: 404 });
+      if (!full && !item) {
+        slog(`\u{1F6D1} ${name} 404\uFF1A\u672C\u5730\u65E0\u526F\u672C\u4E14\u89E3\u6790\u5931\u8D25`);
+        return new Response("\u672A\u627E\u5230\uFF08\u672A\u767B\u5F55\u6216\u4E91\u7AEF\u65E0\u6B64\u6587\u4EF6\uFF09", { status: 404 });
+      }
       const size = full ? full.size : item.size;
       const ct = cfg.contentType?.(name) ?? "application/octet-stream";
       const baseHeaders = { "Accept-Ranges": "bytes", "Content-Type": ct, "Cache-Control": "no-store" };
@@ -291,11 +321,17 @@
   // src/sw.ts
   var sw = self;
   var MIME = { mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac", ogg: "audio/ogg" };
+  function swLog(msg) {
+    void sw.clients.matchAll({ includeUncontrolled: true }).then((cs) => {
+      for (const c of cs) c.postMessage({ br2log: msg });
+    });
+  }
   var gw = createSwStreamGateway({
     dbName: "br-spike.defaultStore",
     streamPrefix: new URL("./stream/", sw.registration.scope).pathname,
-    contentType: (n) => MIME[n.split(".").pop().toLowerCase()] ?? "application/octet-stream"
+    contentType: (n) => MIME[n.split(".").pop().toLowerCase()] ?? "application/octet-stream",
     // 内容知识在 app 侧（store 网关保持内容盲）
+    onLog: swLog
   });
   sw.addEventListener("install", () => {
     void sw.skipWaiting();

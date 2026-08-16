@@ -6,7 +6,7 @@ import { createStore, createOneDriveProvider } from "../../../20260813 internal-
 import { startSwAuthBridge } from "../../../20260813 internal-store/src/sw/bridge.ts";
 import { CLIENT_ID, AUTHORITY, SCOPES } from "../../config.js";
 
-const SPIKE_V = "spike-3 · 2026-08-15";
+const SPIKE_V = "spike-4 · 2026-08-15";
 const APP_ID = "br-spike";
 const DB_NAME = `${APP_ID}.defaultStore`;
 const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -240,13 +240,15 @@ function makeWav(secs: number, freq: number): Uint8Array {
 
 // ── boot ────────────────────────────────────────────────────────────────
 document.getElementById("ver")!.textContent = SPIKE_V;
+navigator.serviceWorker.addEventListener("message", (e) => { const m = (e.data as { br2log?: string })?.br2log; if (m) log(`[SW] ${m}`); });
 let booted = false;
 function proceedSignedIn(): void {
   if (booted) return;
   booted = true;
   log(`已登录：${String((auth.getActiveAccount() as { username?: string })?.username ?? "")}`);
   document.getElementById("login")!.hidden = true;
-  startSwAuthBridge({ dbName: DB_NAME, getToken: () => auth.getToken() });   // 三层堵洞①：页面活着就续凭据给 SW
+  const bridge = startSwAuthBridge({ dbName: DB_NAME, getToken: () => auth.getToken() });   // 三层堵洞①：页面活着就续凭据给 SW
+  void bridge.ready.then(() => log("凭据桥就绪（SW 可取 token）"));
   void store.files.drainOfflineQueue().then(() => log("离线补推队列已排空")).catch((e) => log(`补推异常：${(e as Error).message}`));
   watch("");
 }
