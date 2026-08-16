@@ -134,9 +134,20 @@
     const encodePath = (p) => p.split("/").filter(Boolean).map(encodeURIComponent).join("/");
     async function graphJson(path) {
       const token = await getToken();
-      if (!token) return null;
+      if (!token) {
+        slog("graph \u8C03\u7528\uFF1A\u65E0 token");
+        return null;
+      }
       const r = await fetch(`${GRAPH_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
-      if (!r.ok) return null;
+      if (!r.ok) {
+        let d = "";
+        try {
+          d = (await r.text()).slice(0, 180);
+        } catch {
+        }
+        slog(`graph ${r.status}\uFF1A${path.slice(0, 90)} \u2190 ${d}`);
+        return null;
+      }
       return await r.json();
     }
     async function resolve(name) {
@@ -170,7 +181,11 @@
       return r;
     }
     async function freshUrl(name, id) {
-      const j = await graphJson(`/me/drive/items/${id}?$select=id,@microsoft.graph.downloadUrl`);
+      let j = await graphJson(`/me/drive/items/${id}?$select=id,@microsoft.graph.downloadUrl`);
+      if (typeof j?.["@microsoft.graph.downloadUrl"] !== "string") {
+        slog(`items/{id} \u672A\u7ED9 downloadUrl \u2192 \u6309\u8DEF\u5F84\u515C\u5E95\uFF1A${name}`);
+        j = await graphJson(`/me/drive/special/approot:/${encodePath(name)}?$select=id,@microsoft.graph.downloadUrl`);
+      }
       const u = j?.["@microsoft.graph.downloadUrl"];
       if (typeof u !== "string") return null;
       urlCache.set(name, u);

@@ -4072,7 +4072,7 @@ var AUTHORITY2 = "https://login.microsoftonline.com/common";
 var SCOPES2 = ["Files.ReadWrite.AppFolder", "offline_access"];
 
 // src/main.ts
-var SPIKE_V = "spike-6 \xB7 2026-08-15";
+var SPIKE_V = "spike-7 \xB7 2026-08-15";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
