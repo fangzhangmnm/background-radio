@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>BR v2 spike</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 12px calc(8px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left)); font-family: sans-serif; background: #14171c; color: #dde3ea; }
+  h1 { font-size: 16px; margin: 4px 0 8px; } #ver { color: #8aa; font-size: 12px; }
+  #now { font-size: 14px; margin: 6px 0; color: #9fd39f; min-height: 1.2em; }
+  audio { width: 100%; margin: 6px 0; }
+  .modes { display: flex; gap: 14px; margin: 6px 0; font-size: 14px; }
+  button { font-size: 14px; padding: 6px 10px; background: #26303b; color: #dde3ea; border: 1px solid #3a4653; border-radius: 6px; }
+  #list { margin: 8px 0; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 6px; border-bottom: 1px solid #262e37; font-size: 14px; }
+  .row span { flex: 1; word-break: break-all; }
+  .row.folder { color: #9cc4e4; } .row.playing { background: #1d2a1d; }
+  #log { margin-top: 10px; padding: 6px; background: #0d1013; border: 1px solid #262e37; border-radius: 6px; font: 11px/1.5 monospace; max-height: 40vh; overflow: auto; word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>BR v2 spike <span id="ver"></span></h1>
+<div id="now">（未播放）</div>
+<audio id="audio" controls preload="metadata"></audio>
+<div class="modes">
+  <label><input type="radio" name="mode" value="single"> 单曲循环</label>
+  <label><input type="radio" name="mode" value="folder" checked> 顺序循环</label>
+  <label><input type="radio" name="mode" value="stop"> 播完停</label>
+</div>
+<div>
+  <button id="seed">播种测试音频（桌面按一次）</button>
+  <button id="login" hidden>交互登录</button>
+</div>
+<div id="list">载入中…</div>
+<div id="log"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
