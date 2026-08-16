@@ -4069,7 +4069,7 @@ var AUTHORITY2 = "https://login.microsoftonline.com/common";
 var SCOPES2 = ["Files.ReadWrite.AppFolder", "offline_access"];
 
 // src/main.ts
-var SPIKE_V = "spike-2 \xB7 2026-08-15";
+var SPIKE_V = "spike-3 \xB7 2026-08-15";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -4097,6 +4097,8 @@ var store = createStore({
   signedIn: () => auth.isSignedIn(),
   autoCacheOpenedFile: false,
   // 流式消费 app：open 过路不留；留离线只走 keepOffline / openStream.keep
+  offlineUploadReplay: "auto",
+  // 离线/未登录时播的种，登录后 drainOfflineQueue 自动补推上云
   ui: {
     busy: async (label, fn) => {
       log(`\u23F3 ${label}`);
@@ -4113,7 +4115,8 @@ var store = createStore({
     reportError: (err, level) => {
       if (level !== "log") log(`\u{1F6D1} ${String(err?.message ?? err)}`);
       else console.log("[store]", err);
-    }
+    },
+    onReplayStatus: (evt) => log(`\u8865\u63A8 ${evt.phase}${evt.name ? `\uFF1A${evt.name}` : ""}\uFF08${evt.done}/${evt.total}\uFF09`)
   }
 });
 async function sniffAudio(plain) {
@@ -4127,14 +4130,30 @@ async function sniffAudio(plain) {
 var streamPrefix = new URL("./stream/", location.href).pathname;
 var streamUrl = (name) => streamPrefix + name.split("/").map(encodeURIComponent).join("/");
 async function ensureSw() {
-  await navigator.serviceWorker.register("./sw.js");
+  const reg = await navigator.serviceWorker.register("./sw.js");
   if (navigator.serviceWorker.controller) {
+    sessionStorage.removeItem("sw-reclaim");
     log("SW \u5DF2\u63A5\u7BA1");
     return;
   }
   log("SW \u5DF2\u6CE8\u518C\uFF0C\u7B49\u63A5\u7BA1\u2026");
-  await new Promise((r) => navigator.serviceWorker.addEventListener("controllerchange", () => r(), { once: true }));
-  log("SW \u63A5\u7BA1\u5B8C\u6210");
+  const claimed = await Promise.race([
+    new Promise((r) => navigator.serviceWorker.addEventListener("controllerchange", () => r(true), { once: true })),
+    new Promise((r) => setTimeout(() => r(false), 2500))
+  ]);
+  if (claimed) {
+    sessionStorage.removeItem("sw-reclaim");
+    log("SW \u63A5\u7BA1\u5B8C\u6210");
+    return;
+  }
+  if ((reg.active || reg.waiting) && !sessionStorage.getItem("sw-reclaim")) {
+    sessionStorage.setItem("sw-reclaim", "1");
+    log("\u5F3A\u5237\u540E SW \u672A\u63A7\u672C\u9875 \u2192 \u81EA\u52A8\u8F6F\u5237\u4E00\u6B21\u63A5\u56DE");
+    location.reload();
+    await new Promise(() => {
+    });
+  }
+  log("\u26A0 SW \u672A\u63A5\u7BA1\uFF08\u6D41\u64AD\u4E0D\u53EF\u7528\uFF09\u2014\u2014\u666E\u901A\u5237\u65B0\u4E00\u6B21\u8BD5\u8BD5");
 }
 var audio = document.getElementById("audio");
 var nowEl = document.getElementById("now");
@@ -4335,6 +4354,7 @@ function proceedSignedIn() {
   log(`\u5DF2\u767B\u5F55\uFF1A${String(auth.getActiveAccount()?.username ?? "")}`);
   document.getElementById("login").hidden = true;
   startSwAuthBridge({ dbName: DB_NAME, getToken: () => auth.getToken() });
+  void store.files.drainOfflineQueue().then(() => log("\u79BB\u7EBF\u8865\u63A8\u961F\u5217\u5DF2\u6392\u7A7A")).catch((e) => log(`\u8865\u63A8\u5F02\u5E38\uFF1A${e.message}`));
   watch("");
 }
 (async () => {

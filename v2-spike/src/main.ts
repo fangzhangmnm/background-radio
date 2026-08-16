@@ -6,7 +6,7 @@ import { createStore, createOneDriveProvider } from "../../../20260813 internal-
 import { startSwAuthBridge } from "../../../20260813 internal-store/src/sw/bridge.ts";
 import { CLIENT_ID, AUTHORITY, SCOPES } from "../../config.js";
 
-const SPIKE_V = "spike-2 · 2026-08-15";
+const SPIKE_V = "spike-3 · 2026-08-15";
 const APP_ID = "br-spike";
 const DB_NAME = `${APP_ID}.defaultStore`;
 const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -33,10 +33,12 @@ const store = createStore({
   validateAdopt: (plain: Blob) => sniffAudio(plain),
   signedIn: () => auth.isSignedIn(),
   autoCacheOpenedFile: false,   // 流式消费 app：open 过路不留；留离线只走 keepOffline / openStream.keep
+  offlineUploadReplay: "auto",  // 离线/未登录时播的种，登录后 drainOfflineQueue 自动补推上云
   ui: {
     busy: async <T>(label: string, fn: () => Promise<T>): Promise<T> => { log(`⏳ ${label}`); try { return await fn(); } finally { log(`✓ ${label}`); } },
     resolveConflict: async ({ name }: { name: string }) => { log(`⚠ 冲突面被触发（${name}）——spike 不该发生，选 cancel`); return "cancel" as const; },
     reportError: (err: unknown, level?: string) => { if (level !== "log") log(`🛑 ${String((err as Error)?.message ?? err)}`); else console.log("[store]", err); },
+    onReplayStatus: (evt: { phase: string; name?: string; done: number; total: number }) => log(`补推 ${evt.phase}${evt.name ? `：${evt.name}` : ""}（${evt.done}/${evt.total}）`),
   },
 });
 async function sniffAudio(plain: Blob): Promise<boolean> {
@@ -52,11 +54,22 @@ async function sniffAudio(plain: Blob): Promise<boolean> {
 const streamPrefix = new URL("./stream/", location.href).pathname;
 const streamUrl = (name: string): string => streamPrefix + name.split("/").map(encodeURIComponent).join("/");
 async function ensureSw(): Promise<void> {
-  await navigator.serviceWorker.register("./sw.js");
-  if (navigator.serviceWorker.controller) { log("SW 已接管"); return; }
+  const reg = await navigator.serviceWorker.register("./sw.js");
+  if (navigator.serviceWorker.controller) { sessionStorage.removeItem("sw-reclaim"); log("SW 已接管"); return; }
   log("SW 已注册，等接管…");
-  await new Promise<void>((r) => navigator.serviceWorker.addEventListener("controllerchange", () => r(), { once: true }));
-  log("SW 接管完成");
+  const claimed = await Promise.race([
+    new Promise<boolean>((r) => navigator.serviceWorker.addEventListener("controllerchange", () => r(true), { once: true })),
+    new Promise<boolean>((r) => setTimeout(() => r(false), 2500)),
+  ]);
+  if (claimed) { sessionStorage.removeItem("sw-reclaim"); log("SW 接管完成"); return; }
+  // 强刷（Ctrl+Shift+R）后的「SW 活着但不控本页」态：controllerchange 永远不来 → 软刷一次接回（sessionStorage 防循环）
+  if ((reg.active || reg.waiting) && !sessionStorage.getItem("sw-reclaim")) {
+    sessionStorage.setItem("sw-reclaim", "1");
+    log("强刷后 SW 未控本页 → 自动软刷一次接回");
+    location.reload();
+    await new Promise<never>(() => { /* 等 reload */ });
+  }
+  log("⚠ SW 未接管（流播不可用）——普通刷新一次试试");
 }
 
 // ── 播放器 ──────────────────────────────────────────────────────────────
@@ -234,6 +247,7 @@ function proceedSignedIn(): void {
   log(`已登录：${String((auth.getActiveAccount() as { username?: string })?.username ?? "")}`);
   document.getElementById("login")!.hidden = true;
   startSwAuthBridge({ dbName: DB_NAME, getToken: () => auth.getToken() });   // 三层堵洞①：页面活着就续凭据给 SW
+  void store.files.drainOfflineQueue().then(() => log("离线补推队列已排空")).catch((e) => log(`补推异常：${(e as Error).message}`));
   watch("");
 }
 (async () => {
