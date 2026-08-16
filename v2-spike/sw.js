@@ -261,26 +261,26 @@
       const baseHeaders = { "Accept-Ranges": "bytes", "Content-Type": ct, "Cache-Control": "no-store" };
       const range = parseRange(req.headers.get("Range"), size) ?? { start: 0, end: null };
       if (range.end != null) {
-        const start2 = range.start, end = range.end;
+        const start2 = range.start, end2 = range.end;
         let body;
-        if (full) body = new Uint8Array(await full.slice(start2, end + 1).arrayBuffer());
+        if (full) body = new Uint8Array(await full.slice(start2, end2 + 1).arrayBuffer());
         else {
-          const i0 = Math.floor(start2 / chunkBytes), i1 = Math.floor(end / chunkBytes);
-          const parts = [];
-          for (let i2 = i0; i2 <= i1; i2++) parts.push(await getChunk(name, item, i2));
-          const buf = new Uint8Array(end - start2 + 1);
-          let w = 0;
-          for (let i2 = i0; i2 <= i1; i2++) {
-            const c = parts[i2 - i0], cs = i2 * chunkBytes;
-            const from = Math.max(start2, cs) - cs, to = Math.min(end + 1, cs + c.length) - cs;
-            buf.set(c.subarray(from, to), w);
-            w += to - from;
+          const i02 = Math.floor(start2 / chunkBytes), i1 = Math.floor(end2 / chunkBytes);
+          const parts2 = [];
+          for (let i = i02; i <= i1; i++) parts2.push(await getChunk(name, item, i));
+          const buf2 = new Uint8Array(end2 - start2 + 1);
+          let w2 = 0;
+          for (let i = i02; i <= i1; i++) {
+            const c = parts2[i - i02], cs = i * chunkBytes;
+            const from = Math.max(start2, cs) - cs, to = Math.min(end2 + 1, cs + c.length) - cs;
+            buf2.set(c.subarray(from, to), w2);
+            w2 += to - from;
           }
-          body = buf;
+          body = buf2;
         }
         return new Response(body, {
           status: 206,
-          headers: { ...baseHeaders, "Content-Range": `bytes ${start2}-${end}/${size}`, "Content-Length": String(end - start2 + 1) }
+          headers: { ...baseHeaders, "Content-Range": `bytes ${start2}-${end2}/${size}`, "Content-Length": String(end2 - start2 + 1) }
         });
       }
       const start = range.start;
@@ -291,28 +291,23 @@
           headers: start > 0 || req.headers.get("Range") ? { ...baseHeaders, "Content-Range": `bytes ${start}-${size - 1}/${size}`, "Content-Length": String(size - start) } : { ...baseHeaders, "Content-Length": String(size) }
         });
       }
-      let i = Math.floor(start / chunkBytes);
-      let skip = start - i * chunkBytes;
-      const nChunks = Math.max(1, Math.ceil(size / chunkBytes));
-      const stream = new ReadableStream({
-        pull: async (controller) => {
-          if (i >= nChunks) {
-            controller.close();
-            return;
-          }
-          const c = await getChunk(name, item, i);
-          controller.enqueue(skip > 0 ? c.subarray(skip) : c);
-          skip = 0;
-          i++;
-        },
-        // cancel：播放器不要了（seek 走了/暂停够久）→ 停拉。已 tee 的分片留在 staging。
-        cancel: () => {
-        }
-      });
-      const isRange = !!req.headers.get("Range");
-      return new Response(stream, {
-        status: isRange ? 206 : 200,
-        headers: isRange ? { ...baseHeaders, "Content-Range": `bytes ${start}-${size - 1}/${size}`, "Content-Length": String(size - start) } : { ...baseHeaders, "Content-Length": String(size) }
+      const WINDOW_CHUNKS = 2;
+      const i0 = Math.floor(start / chunkBytes);
+      const end = Math.min(size - 1, (i0 + WINDOW_CHUNKS) * chunkBytes - 1);
+      const parts = [];
+      for (let i = i0; i <= Math.floor(end / chunkBytes); i++) parts.push(await getChunk(name, item, i));
+      const buf = new Uint8Array(end - start + 1);
+      let w = 0;
+      for (let i = i0; i <= Math.floor(end / chunkBytes); i++) {
+        const c = parts[i - i0], cs = i * chunkBytes;
+        const from = Math.max(start, cs) - cs, to = Math.min(end + 1, cs + c.length) - cs;
+        buf.set(c.subarray(from, to), w);
+        w += to - from;
+      }
+      slog(`\u7B54\u7A97\u53E3 206\uFF1Abytes ${start}-${end}/${size}\uFF08${buf.length}B\uFF09`);
+      return new Response(buf, {
+        status: 206,
+        headers: { ...baseHeaders, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": String(buf.length) }
       });
     }
     return { matches, handle };

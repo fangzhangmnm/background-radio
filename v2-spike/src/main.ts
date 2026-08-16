@@ -6,7 +6,7 @@ import { createStore, createOneDriveProvider } from "../../../20260813 internal-
 import { startSwAuthBridge } from "../../../20260813 internal-store/src/sw/bridge.ts";
 import { CLIENT_ID, AUTHORITY, SCOPES } from "../../config.js";
 
-const SPIKE_V = "spike-4 · 2026-08-15";
+const SPIKE_V = "spike-5 · 2026-08-15";
 const APP_ID = "br-spike";
 const DB_NAME = `${APP_ID}.defaultStore`;
 const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -59,7 +59,7 @@ async function ensureSw(): Promise<void> {
   log("SW 已注册，等接管…");
   const claimed = await Promise.race([
     new Promise<boolean>((r) => navigator.serviceWorker.addEventListener("controllerchange", () => r(true), { once: true })),
-    new Promise<boolean>((r) => setTimeout(() => r(false), 2500)),
+    new Promise<boolean>((r) => setTimeout(() => r(false), 1200)),
   ]);
   if (claimed) { sessionStorage.removeItem("sw-reclaim"); log("SW 接管完成"); return; }
   // 强刷（Ctrl+Shift+R）后的「SW 活着但不控本页」态：controllerchange 永远不来 → 软刷一次接回（sessionStorage 防循环）

@@ -4072,7 +4072,7 @@ var AUTHORITY2 = "https://login.microsoftonline.com/common";
 var SCOPES2 = ["Files.ReadWrite.AppFolder", "offline_access"];
 
 // src/main.ts
-var SPIKE_V = "spike-4 \xB7 2026-08-15";
+var SPIKE_V = "spike-5 \xB7 2026-08-15";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -4142,7 +4142,7 @@ async function ensureSw() {
   log("SW \u5DF2\u6CE8\u518C\uFF0C\u7B49\u63A5\u7BA1\u2026");
   const claimed = await Promise.race([
     new Promise((r) => navigator.serviceWorker.addEventListener("controllerchange", () => r(true), { once: true })),
-    new Promise((r) => setTimeout(() => r(false), 2500))
+    new Promise((r) => setTimeout(() => r(false), 1200))
   ]);
   if (claimed) {
     sessionStorage.removeItem("sw-reclaim");
