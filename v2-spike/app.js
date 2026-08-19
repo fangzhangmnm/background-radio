@@ -2396,6 +2396,18 @@ function createDownloadSessions(cfg) {
       reportStoreError(e, "log");
     }
   }
+  async function coverage(name) {
+    const m = await readMeta(name);
+    if (!m) return null;
+    const nChunks = Math.max(1, Math.ceil(m.totalBytes / m.chunkBytes));
+    const got = new Set(m.chunks);
+    const sizeOf = (i) => Math.min(m.chunkBytes, m.totalBytes - i * m.chunkBytes);
+    let bytes = 0;
+    for (const i of got) if (i >= 0 && i < nChunks) bytes += sizeOf(i);
+    let headBytes = 0;
+    for (let i = 0; i < nChunks && got.has(i); i++) headBytes += sizeOf(i);
+    return { totalBytes: m.totalBytes, bytes, headBytes, complete: headBytes === m.totalBytes, eTag: m.eTag };
+  }
   async function open(name) {
     const cm0 = await fetchMeta(name);
     if (!cm0) return null;
@@ -2513,7 +2525,7 @@ function createDownloadSessions(cfg) {
       }
     };
   }
-  return { open, purgeName, _enforceCap: enforceCap };
+  return { open, coverage, purgeName, _enforceCap: enforceCap };
 }
 
 // ../../20260813 internal-store/src/kv-namespace.ts
@@ -3240,6 +3252,10 @@ function createStore(config) {
         return local.exists(name);
       },
       // 有本地副本 = 已留作离线（无 LRU、无独立 pin flag）
+      stagingCoverage() {
+        return sessions.coverage(name);
+      },
+      // A5 透明面：只读账本，零网络（离线徽章/护栏用）
       async keepOffline(opts) {
         if (await local.exists(name)) return;
         const runOnce = async () => {
@@ -3822,7 +3838,7 @@ async function downloadRangeFromUrl(downloadUrl, offset, length) {
   return await r.arrayBuffer();
 }
 async function getDownloadUrl(itemId) {
-  const r = await graphFetch("GET", `/me/drive/items/${itemId}?$select=id,@microsoft.graph.downloadUrl`);
+  const r = await graphFetch("GET", `/me/drive/items/${itemId}`);
   const j = await r.json();
   return j["@microsoft.graph.downloadUrl"] || null;
 }
@@ -4072,14 +4088,14 @@ var AUTHORITY2 = "https://login.microsoftonline.com/common";
 var SCOPES2 = ["Files.ReadWrite.AppFolder", "offline_access"];
 
 // src/main.ts
-var SPIKE_V = "spike-8 \xB7 2026-08-16";
+var SPIKE_V = "spike-9 \xB7 2026-08-18";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
 var logEl = document.getElementById("log");
 function log(msg) {
   const t = /* @__PURE__ */ new Date();
-  const line = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}:${String(t.getSeconds()).padStart(2, "0")} ${msg}`;
+  const line = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}:${String(t.getSeconds()).padStart(2, "0")}.${String(t.getMilliseconds()).padStart(3, "0")} ${msg}`;
   const div = document.createElement("div");
   div.textContent = line;
   logEl.prepend(div);
@@ -4169,25 +4185,52 @@ function nextOf(name) {
   const i = tracks.indexOf(name);
   return i >= 0 && tracks.length > 0 ? tracks[(i + 1) % tracks.length] : null;
 }
+var fileOf = (name) => store.file(name, { isZip: false, mode: "existing" });
+var HEAD_READY_BYTES = 512 * 1024;
 async function prefetchNextHead(name) {
   const next = nextOf(name);
   nextHeadReady = null;
   if (!next || mode !== "folder") return;
   try {
-    const h = await store.file(next, { isZip: false, mode: "existing" }).openStream();
+    const f = fileOf(next);
+    if (await f.isKeptOffline()) {
+      nextHeadReady = next;
+      log(`\u8FB9\u754C\u5907\u6218\uFF1A\u4E0B\u4E00\u66F2=\u672C\u5730\u526F\u672C\uFF08\u5DF2\u9489\uFF09\u2192 \u63A5\u66F2\u5C31\u7EEA\uFF1A${next}`);
+      return;
+    }
+    const cov = await f.stagingCoverage();
+    if (cov && (cov.complete || cov.headBytes >= HEAD_READY_BYTES)) {
+      nextHeadReady = next;
+      log(`\u8FB9\u754C\u5907\u6218\uFF1A\u4E0B\u4E00\u66F2\u5DF2\u5728\u7F13\u5B58\uFF08${cov.complete ? "\u5B8C\u6574" : `\u5934\u90E8 ${Math.round(cov.headBytes / 1024)}KB`}\uFF09\u2192 \u63A5\u66F2\u5C31\u7EEA\uFF1A${next}`);
+      return;
+    }
+    const h = await f.openStream();
     if (!h) {
-      log(`\u9884\u62C9\u4E0B\u4E00\u66F2\u5931\u8D25\uFF08\u62FF\u4E0D\u5230\uFF09\uFF1A${next}`);
+      log(`\u8FB9\u754C\u5907\u6218\u5931\u8D25\uFF1A${next} \u62FF\u4E0D\u5230\uFF08${navigator.onLine ? "\u4E91\u7AEF\u89E3\u6790\u5931\u8D25" : "\u79BB\u7EBF\u4E14\u65E0\u7F13\u5B58"}\uFF09\u2192 \u5C4A\u65F6\u964D\u7EA7 loop`);
       return;
     }
     await h.prefetch(0, 768 * 1024);
     h.close();
     nextHeadReady = next;
-    log(`\u4E0B\u4E00\u66F2\u5934\u90E8\u5DF2\u5907\u597D\uFF1A${next}`);
+    log(`\u8FB9\u754C\u5907\u6218\uFF1A\u4E0B\u4E00\u66F2\u5934\u90E8\u5DF2\u9884\u62C9 \u2192 \u63A5\u66F2\u5C31\u7EEA\uFF1A${next}`);
   } catch (e) {
-    log(`\u9884\u62C9\u4E0B\u4E00\u66F2\u5F02\u5E38\uFF1A${String(e.message)}`);
+    log(`\u8FB9\u754C\u5907\u6218\u5F02\u5E38\uFF1A${String(e.message)} \u2192 \u5C4A\u65F6\u964D\u7EA7 loop`);
   }
 }
-function play(name) {
+async function play(name) {
+  if (!navigator.onLine && !await fileOf(name).isKeptOffline()) {
+    const cov = await fileOf(name).stagingCoverage();
+    if (!cov?.complete) {
+      const why = cov ? `\u7F13\u5B58\u4E0D\u5B8C\u6574 ${Math.round(cov.bytes / cov.totalBytes * 100)}%` : "\u65E0\u7F13\u5B58";
+      log(`\u26D4 \u79BB\u7EBF\u8D77\u64AD\u62D2\u7EDD\uFF1A${name}\uFF08${why}\uFF09\u2014\u2014\u9632\u5148\u54CD\u540E\u5361\u6B7B`);
+      nowEl.textContent = `\u26D4 \u79BB\u7EBF\u4E0D\u53EF\u64AD\uFF1A${name.split("/").pop()}\uFF08${why}\uFF09`;
+      return;
+    }
+    log(`\u79BB\u7EBF\u8D77\u64AD\u653E\u884C\uFF1A${name}\uFF08\u7F13\u5B58\u5B8C\u6574\uFF09`);
+  }
+  startPlayback(name);
+}
+function startPlayback(name) {
   current = name;
   audio.loop = mode === "single";
   audio.src = streamUrl(name);
@@ -4198,7 +4241,7 @@ function play(name) {
   renderList();
 }
 audio.addEventListener("ended", () => {
-  log(`ended\uFF08mode=${mode}\uFF0Cflag=${nextHeadReady ?? "\u65E0"}\uFF09`);
+  log(`\u2605\u8FB9\u754C\u51B3\u7B56\uFF1Aended\uFF08mode=${mode}\uFF0C\u63A5\u66F2 flag=${nextHeadReady ?? "\u65E0"}\uFF0Conline=${navigator.onLine}\uFF09`);
   if (mode !== "folder" || !current) return;
   const next = nextOf(current);
   if (next && nextHeadReady === next) {
@@ -4209,16 +4252,63 @@ audio.addEventListener("ended", () => {
     nowEl.textContent = `\u25B6 ${next}`;
     setMediaSession(next);
     void prefetchNextHead(next);
+    renderList();
   } else {
     audio.loop = true;
     void audio.play().catch(() => {
     });
-    log("\u2605\u964D\u7EA7 audio.loop \u5355\u66F2\u5FAA\u73AF\uFF08\u4E0B\u4E00\u66F2\u5934\u90E8\u672A\u5907\u597D/\u65E0\u4E0B\u4E00\u66F2\uFF09");
+    log(`\u2605\u8FB9\u754C\u51B3\u7B56\uFF1A\u964D\u7EA7 audio.loop \u5355\u66F2\u5FAA\u73AF\uFF08${next ? `\u4E0B\u4E00\u66F2 ${next} \u672A\u5C31\u7EEA` : "\u65E0\u4E0B\u4E00\u66F2"}\uFF09\u2014\u2014\u56DE\u524D\u53F0/\u56DE\u7EBF\u81EA\u6108\u89E3\u9664`);
   }
 });
 for (const ev of ["error", "stalled", "waiting", "playing", "pause"]) {
   audio.addEventListener(ev, () => log(`audio \u4E8B\u4EF6\uFF1A${ev}${ev === "error" ? ` code=${audio.error?.code}` : ""}`));
 }
+audio.addEventListener("error", () => {
+  if (!navigator.onLine && current) nowEl.textContent = `\u26A0 \u64AD\u653E\u4E2D\u65AD\uFF1A\u79BB\u7EBF\u4E14\u7F13\u5B58\u4E0D\u5B8C\u6574\uFF08${current.split("/").pop()}\uFF09\u2014\u2014\u56DE\u7EBF\u540E\u81EA\u52A8\u7EED`;
+});
+var lastMediaWall = 0;
+audio.addEventListener("timeupdate", () => {
+  lastMediaWall = Date.now();
+});
+function recoverPlayback(reason) {
+  if (!current) return;
+  const t = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+  log(`\u81EA\u6108\uFF1A\u91CD\u5EFA\u64AD\u653E\uFF08${reason}\uFF0C\u4F4D\u7F6E ${t.toFixed(1)}s\uFF09\uFF1A${current}`);
+  audio.src = streamUrl(current);
+  audio.currentTime = t;
+  void audio.play().then(() => {
+    log("\u81EA\u6108\uFF1A\u64AD\u653E\u5DF2\u7EED\u4E0A");
+    nowEl.textContent = `\u25B6 ${current}`;
+  }).catch((e) => log(`\u81EA\u6108 play() \u62D2\u7EDD\uFF1A${e.message}`));
+}
+function healCheck(trigger) {
+  log(`\u81EA\u6108\u68C0\u67E5\uFF08${trigger}\uFF0Conline=${navigator.onLine}\uFF09`);
+  if (navigator.onLine && lastSnap) watch(currentFolder);
+  if (!current || mode === "stop") return;
+  if (navigator.onLine) {
+    if (audio.error) recoverPlayback(`audio.error code=${audio.error.code}`);
+    else if (!audio.paused) {
+      const wall0 = lastMediaWall;
+      setTimeout(() => {
+        if (!navigator.onLine || !current || audio.paused) return;
+        if (lastMediaWall === wall0) recoverPlayback("\u56DE\u7EBF 2.5s \u65E0\u64AD\u653E\u8FDB\u5EA6\uFF08stall\uFF09");
+        else log("\u81EA\u6108\u68C0\u67E5\uFF1A\u64AD\u653E\u5728\u8D70\uFF0C\u65E0\u9700\u91CD\u5EFA");
+      }, 2500);
+    }
+  }
+  if (mode === "folder") {
+    void prefetchNextHead(current).then(() => {
+      if (audio.loop && nextHeadReady) {
+        audio.loop = false;
+        log("\u81EA\u6108\uFF1A\u89E3\u9664\u964D\u7EA7\u5355\u66F2\u5FAA\u73AF \u2192 \u6062\u590D\u987A\u5E8F\u63A5\u66F2");
+      }
+    });
+  }
+}
+addEventListener("online", () => healCheck("online \u4E8B\u4EF6"));
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) healCheck("\u56DE\u524D\u53F0");
+});
 function setMediaSession(name) {
   if (!("mediaSession" in navigator)) return;
   try {
@@ -4227,7 +4317,7 @@ function setMediaSession(name) {
     navigator.mediaSession.setActionHandler("pause", () => audio.pause());
     navigator.mediaSession.setActionHandler("nexttrack", () => {
       const n = current && nextOf(current);
-      if (n) play(n);
+      if (n) void play(n);
     });
   } catch {
   }
@@ -4246,6 +4336,29 @@ function watch(folder) {
   });
 }
 var pinProgress = /* @__PURE__ */ new Map();
+var covBadge = /* @__PURE__ */ new Map();
+var covRefreshing = false;
+async function refreshCovBadges() {
+  if (!lastSnap || covRefreshing) return;
+  covRefreshing = true;
+  try {
+    let changed = false;
+    for (const it of lastSnap.items) {
+      let txt = "";
+      if (it.syncState === "cloud-only") {
+        const cov = await fileOf(it.path).stagingCoverage();
+        txt = !cov ? "" : cov.complete ? "\u5DF2\u7F13\u5B58\u53EF\u79BB\u7EBF" : `\u7F13\u5B58${Math.round(cov.bytes / cov.totalBytes * 100)}%\u6709\u6D1E`;
+      }
+      if ((covBadge.get(it.path) ?? "") !== txt) {
+        txt ? covBadge.set(it.path, txt) : covBadge.delete(it.path);
+        changed = true;
+      }
+    }
+    if (changed) renderList();
+  } finally {
+    covRefreshing = false;
+  }
+}
 function renderList() {
   if (!lastSnap) return;
   listEl.innerHTML = "";
@@ -4257,9 +4370,10 @@ function renderList() {
     const row = document.createElement("div");
     row.className = "row" + (name === current ? " playing" : "");
     const label = document.createElement("span");
-    label.textContent = `${isAudio ? "\u{1F3B5}" : "\u{1F4C4}"} ${name.split("/").pop()}\uFF08${it.syncState}${pinProgress.has(name) ? " " + pinProgress.get(name) : ""}\uFF09`;
+    const extra = pinProgress.get(name) ?? covBadge.get(name);
+    label.textContent = `${isAudio ? "\u{1F3B5}" : "\u{1F4C4}"} ${name.split("/").pop()}\uFF08${it.syncState}${extra ? "\xB7" + extra : ""}\uFF09`;
     label.onclick = () => {
-      if (isAudio) play(name);
+      if (isAudio) void play(name);
     };
     row.append(label);
     const pin = document.createElement("button");
@@ -4288,6 +4402,7 @@ function renderList() {
     row.append(pin);
     listEl.append(row);
   }
+  void refreshCovBadges();
 }
 function addRow(text, onclick) {
   const row = document.createElement("div");
