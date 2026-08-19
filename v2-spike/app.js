@@ -1837,7 +1837,7 @@ function classifySyncState(f) {
   if (!f.hasLocal) return "cloud-only";
   if (!f.cloudReachable) {
     if (f.dirty) return f.everSynced ? "unpushed" : "float";
-    return "local-only";
+    return f.everSynced ? "synced" : "local-only";
   }
   if (f.hasCloud) {
     const moved = f.cloudMoved || !f.everSynced;
@@ -2408,6 +2408,23 @@ function createDownloadSessions(cfg) {
     for (let i = 0; i < nChunks && got.has(i); i++) headBytes += sizeOf(i);
     return { totalBytes: m.totalBytes, bytes, headBytes, complete: headBytes === m.totalBytes, eTag: m.eTag };
   }
+  async function promoteFromStaging(name) {
+    const m = await readMeta(name);
+    if (!m) return "none";
+    const nChunks = Math.max(1, Math.ceil(m.totalBytes / m.chunkBytes));
+    const parts = [];
+    let size = 0;
+    for (let i = 0; i < nChunks; i++) {
+      const c = await sGet(cKey(name, i));
+      if (!c) return "incomplete";
+      parts.push(c);
+      size += c.size;
+    }
+    if (size !== m.totalBytes) return "incomplete";
+    await adoptLocal(name, new Blob(parts), m.eTag);
+    await purgeName(name);
+    return "done";
+  }
   async function open(name) {
     const cm0 = await fetchMeta(name);
     if (!cm0) return null;
@@ -2525,7 +2542,7 @@ function createDownloadSessions(cfg) {
       }
     };
   }
-  return { open, coverage, purgeName, _enforceCap: enforceCap };
+  return { open, coverage, promoteFromStaging, purgeName, _enforceCap: enforceCap };
 }
 
 // ../../20260813 internal-store/src/kv-namespace.ts
@@ -3259,7 +3276,19 @@ function createStore(config) {
       async keepOffline(opts) {
         if (await local.exists(name)) return;
         const runOnce = async () => {
-          const sess = await sessions.open(name);
+          if (!isOnline()) {
+            const r = await sessions.promoteFromStaging(name);
+            if (r === "done") return;
+            throw new Error(`\u79BB\u7EBF\u65E0\u6CD5\u7559\u79BB\u7EBF\uFF1A\u672C\u5730\u7F13\u5B58${r === "none" ? "\u6CA1\u6709" : "\u4E0D\u5B8C\u6574"}\uFF0C\u9700\u8981\u7F51\u7EDC\u8865\u9F50`);
+          }
+          let sess;
+          try {
+            sess = await sessions.open(name);
+          } catch (e) {
+            const r = await sessions.promoteFromStaging(name);
+            if (r === "done") return;
+            throw new Error(`\u7559\u79BB\u7EBF\u5931\u8D25\uFF1A\u4E91\u7AEF\u4E0D\u53EF\u8FBE\uFF08${e.message}\uFF09\uFF0C\u4E14\u672C\u5730\u7F13\u5B58${r === "none" ? "\u6CA1\u6709" : "\u4E0D\u5B8C\u6574"}`);
+          }
           if (!sess) return;
           try {
             await sess.promote({ onProgress: opts?.onProgress });
@@ -4142,7 +4171,7 @@ function decideHeal(i) {
 }
 
 // src/main.ts
-var SPIKE_V = "spike-12 \xB7 2026-08-19";
+var SPIKE_V = "spike-13 \xB7 2026-08-19";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -4535,7 +4564,8 @@ function renderList() {
             renderList();
           } });
           pinProgress.delete(name);
-          log(`\u7559\u79BB\u7EBF\u5B8C\u6210\uFF1A${name}\uFF08${((Date.now() - t0) / 1e3).toFixed(1)}s\uFF09\u2605\u82E5\u5148\u64AD\u8FC7/\u5DF2\u7F13\u5B58\u5E94\u5FEB\uFF08\u53EA\u8865\u7F3A\u53E3\uFF09`);
+          if (await f.isKeptOffline()) log(`\u7559\u79BB\u7EBF\u5B8C\u6210\uFF1A${name}\uFF08${((Date.now() - t0) / 1e3).toFixed(1)}s\uFF09\u2605\u82E5\u5148\u64AD\u8FC7/\u5DF2\u7F13\u5B58\u5E94\u5FEB\uFF08\u53EA\u8865\u7F3A\u53E3\uFF09`);
+          else log(`\u26A0 \u7559\u79BB\u7EBF\u672A\u5B8C\u6210\uFF1A${name}\uFF08\u539F\u56E0\u89C1\u4E0A\u65B9 \u{1F6D1} \u884C\uFF09`);
         }
       } catch (e) {
         log(`\u{1F6D1} \u7559\u79BB\u7EBF/\u79FB\u9664\u5F02\u5E38\uFF1A${name}\uFF1A${e.message}`);

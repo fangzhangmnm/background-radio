@@ -17,7 +17,7 @@ import { startSwAuthBridge } from "../../../20260813 internal-store/src/sw/bridg
 import { CLIENT_ID, AUTHORITY, SCOPES } from "../../config.js";
 import { nextOf, resolveAvail, classifyNextReady, decideBoundary, decideStartPlayback, decideHeal, decideRecovery, retryDelayMs, type NextReady } from "./player-logic.ts";
 
-const SPIKE_V = "spike-12 · 2026-08-19";
+const SPIKE_V = "spike-13 · 2026-08-19";
 const APP_ID = "br-spike";
 const DB_NAME = `${APP_ID}.defaultStore`;
 const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -343,7 +343,9 @@ function renderList(): void {
           const t0 = Date.now();
           await f.keepOffline({ onProgress: (d, t) => { pinProgress.set(name, `${Math.round((d / t) * 100)}%`); renderList(); } });
           pinProgress.delete(name);
-          log(`留离线完成：${name}（${((Date.now() - t0) / 1000).toFixed(1)}s）★若先播过/已缓存应快（只补缺口）`);
+          // keepOffline 失败走 reportError 吞掉后照常 resolve → 必须复核事实再报，别谎报完成（五轮战报打回）
+          if (await f.isKeptOffline()) log(`留离线完成：${name}（${((Date.now() - t0) / 1000).toFixed(1)}s）★若先播过/已缓存应快（只补缺口）`);
+          else log(`⚠ 留离线未完成：${name}（原因见上方 🛑 行）`);
         }
       } catch (e) { log(`🛑 留离线/移除异常：${name}：${(e as Error).message}`); pinProgress.delete(name); }
       renderList();
