@@ -9,12 +9,15 @@
 // 事件全没来 → 谁都没触发自愈）；② 护栏收窄——「无缓存」不拦直接试（没缓存不存在先响后卡死；
 // iOS onLine 有说谎前科，拦了会误伤真在线）；③ 接曲 flag 带全量/仅头语义 + pin/移除后重备战
 // （战例：备战后被移除离线 → 陈 flag 盲步进到零字节曲 → 播放挂死）。
+// spike-11（2026-08-19 三轮战报）：连 wifi 前台 SW fetch 抛 Load failed（iOS 网络切换后遗症/URL 过期 throw），
+// 看门狗无退避刷屏 → 错误恢复改升级链（退避重试 SW → 同源探针分辨真断网 vs SW 僵死 → 页面直下整曲
+// 播 blob = 计划内建降级链补全）；SW 网关 fetch throw 也走换 URL 重试（store 侧）。
 import { createStore, createOneDriveProvider } from "../../../20260813 internal-store/src/index.ts";
 import { startSwAuthBridge } from "../../../20260813 internal-store/src/sw/bridge.ts";
 import { CLIENT_ID, AUTHORITY, SCOPES } from "../../config.js";
-import { nextOf, resolveAvail, classifyNextReady, decideBoundary, decideStartPlayback, decideHeal, type NextReady } from "./player-logic.ts";
+import { nextOf, resolveAvail, classifyNextReady, decideBoundary, decideStartPlayback, decideHeal, decideRecovery, retryDelayMs, type NextReady } from "./player-logic.ts";
 
-const SPIKE_V = "spike-10 · 2026-08-19";
+const SPIKE_V = "spike-11 · 2026-08-19";
 const APP_ID = "br-spike";
 const DB_NAME = `${APP_ID}.defaultStore`;
 const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -175,12 +178,64 @@ function recoverPlayback(reason: string): void {
   audio.currentTime = t;
   void audio.play().then(() => { log("自愈：播放已续上"); nowEl.textContent = `▶ ${current}`; }).catch((e) => log(`自愈 play() 拒绝：${e.message}`));
 }
+// ── 错误恢复升级链（spike-11；决策 player-logic.decideRecovery，已 mock 测）────────────────
+//   战例：连 wifi 前台 SW fetch 抛 Load failed，看门狗无退避每 8s 重试同一条死路刷屏。
+//   链：退避重试 SW 路 → 同源探针（分辨真断网 vs SW fetch 僵死）→ 页面直下整曲播 blob（计划内建
+//   降级链「SW 媒体失败→等整下再播 blob」的补全；页面 fetch 走 MSAL 不经 SW，恰好绕开僵死面）。
+const MIME_BLOB: Record<string, string> = { mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac", ogg: "audio/ogg" };
+let recFailures = 0, recProbeOk: boolean | null = null, recBlobTried = false, recNextAt = 0, blobUrl: string | null = null;
+audio.addEventListener("playing", () => {
+  if (recFailures || recBlobTried) log("播放已续上——恢复链计数归零");
+  recFailures = 0; recProbeOk = null; recBlobTried = false; recNextAt = 0;
+});
+async function escalateRecovery(trigger: string): Promise<void> {
+  if (Date.now() < recNextAt) return;                         // 退避窗内不动（防刷屏）
+  const plan = decideRecovery({ online: navigator.onLine, failures: recFailures, probeOk: recProbeOk, blobTried: recBlobTried });
+  if (plan.action === "retry-sw") {
+    recFailures++;
+    recNextAt = Date.now() + retryDelayMs(recFailures);
+    recoverPlayback(`${trigger}：重试 SW 路（第 ${recFailures} 次，退避 ${retryDelayMs(recFailures) / 1000}s）`);
+  } else if (plan.action === "probe") {
+    recNextAt = Date.now() + 8000;
+    try { recProbeOk = (await fetch(`./manifest.webmanifest?heal-probe=${Date.now()}`, { cache: "no-store" })).ok; }
+    catch { recProbeOk = false; }
+    log(`探针：同源拉取${recProbeOk ? "通——页面网络活着，SW fetch 僵死（iOS 网络切换后遗症）→ 走 blob 降级" : "不通——真断网（onLine 在说谎），等网络"}`);
+  } else if (plan.action === "blob-fallback") {
+    recBlobTried = true;
+    recNextAt = Date.now() + 8000;
+    await blobFallbackPlay();
+  } else {
+    recNextAt = Date.now() + 60_000;
+    log(`恢复暂缓：${plan.reason}（60s 后重启恢复链）`);
+    recProbeOk = null;                                        // 下一轮重探（网络可能已变）
+    if (recBlobTried) { recFailures = 0; recBlobTried = false; }
+  }
+}
+async function blobFallbackPlay(): Promise<void> {
+  if (!current) return;
+  const t = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+  log(`降级：页面直下整曲播 blob：${current}`);
+  try {
+    const h = await fileOf(current).openStream();
+    if (!h) { log("降级失败：openStream 拿不到（页面侧也解析不到）"); return; }
+    if (h.totalSize > 64 * 1024 * 1024) { h.close(); log(`降级放弃：${Math.round(h.totalSize / 1048576)}MB 太大不整下（继续等 SW 活）`); return; }
+    const bytes = await h.read(0, h.totalSize);               // 页面拉字节（顺手 tee 回 staging，SW 复活后受益）
+    h.close();
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    blobUrl = URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: MIME_BLOB[current.split(".").pop()!.toLowerCase()] ?? "application/octet-stream" }));
+    audio.src = blobUrl;
+    audio.currentTime = t;
+    void audio.play().then(() => log(`降级成功：blob 续播（${t.toFixed(1)}s 起）`)).catch((e) => log(`降级 play() 拒绝：${e.message}`));
+  } catch (e) { log(`降级异常：${(e as Error).message}`); }
+}
+
 // 自愈动作执行器（决策在 player-logic.decideHeal，已 mock 测；此处只翻译成副作用，幂等）。
 function applyHeal(trigger: string): void {
   const acts = decideHeal({ online: navigator.onLine, current, mode, hasError: !!audio.error, loopEngaged: audio.loop, nextReady });
   if (!acts.length) return;
+  if (acts.length === 1 && acts[0] === "rebuild" && Date.now() < recNextAt) return;   // 退避窗内静默（防日志刷屏）
   log(`自愈（${trigger}）：${acts.join("+")}`);
-  if (acts.includes("rebuild")) recoverPlayback(`${trigger}：播放错误态且在线`);
+  if (acts.includes("rebuild")) void escalateRecovery(trigger);   // 错误态恢复走升级链（退避/探针/blob），不再裸重试
   if (acts.includes("unloop")) { audio.loop = false; log("自愈：解除降级单曲循环 → 恢复顺序接曲"); }
   if (acts.includes("re-arm") && current) {
     void prefetchNextHead(current).then(() => {

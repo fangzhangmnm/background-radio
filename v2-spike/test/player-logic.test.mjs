@@ -1,7 +1,7 @@
 // player-logic 纯决策层 mock 测（node test/player-logic.test.mjs；node≥22 直接吃 .ts import）。
 // 含两轮 iPad 真机战例的回放断言——逻辑层的坑先在这死，不转嫁真机。
 import assert from "node:assert/strict";
-import { resolveAvail, nextOf, classifyNextReady, decideBoundary, decideStartPlayback, decideHeal } from "../src/player-logic.ts";
+import { resolveAvail, nextOf, classifyNextReady, decideBoundary, decideStartPlayback, decideHeal, decideRecovery, retryDelayMs } from "../src/player-logic.ts";
 
 let n = 0;
 const eq = (a, b, msg) => { assert.deepEqual(a, b, msg); n++; };
@@ -64,5 +64,17 @@ eq(H({}), [], "稳态（在线播着、flag 齐）什么都不做——幂等");
 eq(H({ current: null, hasError: true }), [], "没在播不自愈");
 eq(H({ mode: "single", loopEngaged: true, hasError: true }), ["rebuild"], "单曲模式只管重建，不碰 loop（原生语义）");
 eq(H({ mode: "stop", hasError: true }), []);
+
+// ── decideRecovery + retryDelayMs（spike-11：连 wifi SW fetch 僵死刷屏战例）────
+const R = (over) => decideRecovery({ online: true, failures: 0, probeOk: null, blobTried: false, ...over });
+eq(R({}), { action: "retry-sw" }, "首败先重试 SW 路");
+eq(R({ failures: 1 }), { action: "retry-sw" });
+eq(R({ failures: 2 }), { action: "probe" }, "两败后先探针分辨真断网 vs SW 僵死");
+eq(R({ failures: 2, probeOk: true }), { action: "blob-fallback" }, "★战例三轮：页面网络通+SW 死=页面直下 blob（计划内建降级链）");
+eq(R({ failures: 2, probeOk: false }).action, "hold", "探针也不通=真断网（onLine 说谎），不空转");
+eq(R({ failures: 5, probeOk: true, blobTried: true }).action, "hold", "blob 也败=退避等待，不刷屏");
+eq(R({ online: false, failures: 9 }).action, "hold", "离线不折腾");
+eq(retryDelayMs(1), 8000); eq(retryDelayMs(2), 16000); eq(retryDelayMs(3), 32000);
+eq(retryDelayMs(4), 60000, "退避封顶 60s"); eq(retryDelayMs(9), 60000);
 
 console.log(`player-logic mock 测：${n} 断言全过`);

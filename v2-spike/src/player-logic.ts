@@ -64,6 +64,24 @@ export function decideStartPlayback(i: { online: boolean; avail: Avail }):
   return { allow: false, why: `缓存不完整 ${Math.round((i.avail.cov.bytes / i.avail.cov.totalBytes) * 100)}%（有洞——防先响后卡死）` };
 }
 
+/** 播放错误恢复的升级链决策（spike-11 战例：连 wifi 前台 SW fetch 抛 Load failed，看门狗无退避
+ *  每 8s 重试同一条死路刷屏）。probeOk=同源探针结果（null=还没探）：分辨「真断网」vs「SW fetch 僵死」。
+ *  retry-sw（带退避）→ 2 败后 probe → 页面网络通 → blob-fallback（页面直下整曲，计划内建降级链）→ hold。 */
+export function decideRecovery(i: { online: boolean; failures: number; probeOk: boolean | null; blobTried: boolean }):
+  | { action: "retry-sw" } | { action: "probe" } | { action: "blob-fallback" } | { action: "hold"; reason: string } {
+  if (!i.online) return { action: "hold", reason: "onLine=false，等回线" };
+  if (i.failures < 2) return { action: "retry-sw" };
+  if (i.probeOk === null) return { action: "probe" };
+  if (!i.probeOk) return { action: "hold", reason: "同源探针也不通=真断网（onLine 在说谎），等网络" };
+  if (!i.blobTried) return { action: "blob-fallback" };
+  return { action: "hold", reason: "blob 降级也试过仍失败，退避重来" };
+}
+
+/** 重试退避：8s → 16s → 32s → 封顶 60s。 */
+export function retryDelayMs(failures: number): number {
+  return Math.min(60_000, 8_000 * 2 ** Math.max(0, failures - 1));
+}
+
 /** 自愈决策（online 事件 / 回前台 / 8s 看门狗共用；幂等）。
  *  rebuild=重建播放（错误态且在线）；unloop=解除降级循环（下一曲已就绪且接得动——ended 会重新裁决，安全）；
  *  re-arm=重新边界备战（降级中或 flag 空，且在线才打网络）。 */

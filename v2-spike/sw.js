@@ -138,7 +138,13 @@
         slog("graph \u8C03\u7528\uFF1A\u65E0 token");
         return null;
       }
-      const r = await fetch(`${GRAPH_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+      let r;
+      try {
+        r = await fetch(`${GRAPH_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+      } catch (e) {
+        slog(`graph \u7F51\u7EDC\u5F02\u5E38\uFF08fetch throw\uFF09\uFF1A${String(e?.message ?? e)}`);
+        return null;
+      }
       if (!r.ok) {
         let d = "";
         try {
@@ -211,11 +217,20 @@
         const doFetch = async (url2) => fetch(url2, { headers: { Range: `bytes=${off}-${off + len - 1}` } });
         let url = urlCache.get(name) ?? await freshUrl(name, item.id);
         if (!url) throw new Error(`\u65E0\u51ED\u636E/\u53D6\u4E0D\u5230 downloadUrl\uFF08token=${await getToken() ? "\u6709" : "\u65E0"}\uFF09\uFF1A${name}`);
-        let resp = await doFetch(url);
-        if (resp.status === 401 || resp.status === 403 || resp.status === 404) {
+        let resp = null;
+        try {
+          resp = await doFetch(url);
+        } catch (e) {
+          slog(`range fetch \u5F02\u5E38\uFF08${String(e?.message ?? e)}\uFF09\u2192 \u6362\u65B0 URL \u91CD\u8BD5`);
+        }
+        if (!resp || resp.status === 401 || resp.status === 403 || resp.status === 404) {
           url = await freshUrl(name, item.id);
           if (!url) throw new Error(`downloadUrl \u7EED\u671F\u5931\u8D25\uFF1A${name}`);
-          resp = await doFetch(url);
+          try {
+            resp = await doFetch(url);
+          } catch (e) {
+            throw new Error(`range \u62C9\u53D6\u7F51\u7EDC\u5F02\u5E38\uFF08\u6362\u65B0 URL \u91CD\u8BD5\u540E\u4ECD\u8D25\uFF09\uFF1A${String(e?.message ?? e)}\uFF1A${name}`);
+          }
         }
         if (!resp.ok && resp.status !== 206) throw new Error(`range \u62C9\u53D6\u5931\u8D25 ${resp.status}\uFF1A${name}`);
         const bytes = new Uint8Array(await resp.arrayBuffer());

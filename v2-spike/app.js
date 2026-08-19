@@ -4120,6 +4120,17 @@ function decideStartPlayback(i) {
   if (i.avail.cov.complete) return { allow: true, note: "\u7F13\u5B58\u5B8C\u6574" };
   return { allow: false, why: `\u7F13\u5B58\u4E0D\u5B8C\u6574 ${Math.round(i.avail.cov.bytes / i.avail.cov.totalBytes * 100)}%\uFF08\u6709\u6D1E\u2014\u2014\u9632\u5148\u54CD\u540E\u5361\u6B7B\uFF09` };
 }
+function decideRecovery(i) {
+  if (!i.online) return { action: "hold", reason: "onLine=false\uFF0C\u7B49\u56DE\u7EBF" };
+  if (i.failures < 2) return { action: "retry-sw" };
+  if (i.probeOk === null) return { action: "probe" };
+  if (!i.probeOk) return { action: "hold", reason: "\u540C\u6E90\u63A2\u9488\u4E5F\u4E0D\u901A=\u771F\u65AD\u7F51\uFF08onLine \u5728\u8BF4\u8C0E\uFF09\uFF0C\u7B49\u7F51\u7EDC" };
+  if (!i.blobTried) return { action: "blob-fallback" };
+  return { action: "hold", reason: "blob \u964D\u7EA7\u4E5F\u8BD5\u8FC7\u4ECD\u5931\u8D25\uFF0C\u9000\u907F\u91CD\u6765" };
+}
+function retryDelayMs(failures) {
+  return Math.min(6e4, 8e3 * 2 ** Math.max(0, failures - 1));
+}
 function decideHeal(i) {
   const out = [];
   if (!i.current || i.mode === "stop") return out;
@@ -4131,7 +4142,7 @@ function decideHeal(i) {
 }
 
 // src/main.ts
-var SPIKE_V = "spike-10 \xB7 2026-08-19";
+var SPIKE_V = "spike-11 \xB7 2026-08-19";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -4315,11 +4326,80 @@ function recoverPlayback(reason) {
     nowEl.textContent = `\u25B6 ${current}`;
   }).catch((e) => log(`\u81EA\u6108 play() \u62D2\u7EDD\uFF1A${e.message}`));
 }
+var MIME_BLOB = { mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", flac: "audio/flac", ogg: "audio/ogg" };
+var recFailures = 0;
+var recProbeOk = null;
+var recBlobTried = false;
+var recNextAt = 0;
+var blobUrl = null;
+audio.addEventListener("playing", () => {
+  if (recFailures || recBlobTried) log("\u64AD\u653E\u5DF2\u7EED\u4E0A\u2014\u2014\u6062\u590D\u94FE\u8BA1\u6570\u5F52\u96F6");
+  recFailures = 0;
+  recProbeOk = null;
+  recBlobTried = false;
+  recNextAt = 0;
+});
+async function escalateRecovery(trigger) {
+  if (Date.now() < recNextAt) return;
+  const plan = decideRecovery({ online: navigator.onLine, failures: recFailures, probeOk: recProbeOk, blobTried: recBlobTried });
+  if (plan.action === "retry-sw") {
+    recFailures++;
+    recNextAt = Date.now() + retryDelayMs(recFailures);
+    recoverPlayback(`${trigger}\uFF1A\u91CD\u8BD5 SW \u8DEF\uFF08\u7B2C ${recFailures} \u6B21\uFF0C\u9000\u907F ${retryDelayMs(recFailures) / 1e3}s\uFF09`);
+  } else if (plan.action === "probe") {
+    recNextAt = Date.now() + 8e3;
+    try {
+      recProbeOk = (await fetch(`./manifest.webmanifest?heal-probe=${Date.now()}`, { cache: "no-store" })).ok;
+    } catch {
+      recProbeOk = false;
+    }
+    log(`\u63A2\u9488\uFF1A\u540C\u6E90\u62C9\u53D6${recProbeOk ? "\u901A\u2014\u2014\u9875\u9762\u7F51\u7EDC\u6D3B\u7740\uFF0CSW fetch \u50F5\u6B7B\uFF08iOS \u7F51\u7EDC\u5207\u6362\u540E\u9057\u75C7\uFF09\u2192 \u8D70 blob \u964D\u7EA7" : "\u4E0D\u901A\u2014\u2014\u771F\u65AD\u7F51\uFF08onLine \u5728\u8BF4\u8C0E\uFF09\uFF0C\u7B49\u7F51\u7EDC"}`);
+  } else if (plan.action === "blob-fallback") {
+    recBlobTried = true;
+    recNextAt = Date.now() + 8e3;
+    await blobFallbackPlay();
+  } else {
+    recNextAt = Date.now() + 6e4;
+    log(`\u6062\u590D\u6682\u7F13\uFF1A${plan.reason}\uFF0860s \u540E\u91CD\u542F\u6062\u590D\u94FE\uFF09`);
+    recProbeOk = null;
+    if (recBlobTried) {
+      recFailures = 0;
+      recBlobTried = false;
+    }
+  }
+}
+async function blobFallbackPlay() {
+  if (!current) return;
+  const t = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+  log(`\u964D\u7EA7\uFF1A\u9875\u9762\u76F4\u4E0B\u6574\u66F2\u64AD blob\uFF1A${current}`);
+  try {
+    const h = await fileOf(current).openStream();
+    if (!h) {
+      log("\u964D\u7EA7\u5931\u8D25\uFF1AopenStream \u62FF\u4E0D\u5230\uFF08\u9875\u9762\u4FA7\u4E5F\u89E3\u6790\u4E0D\u5230\uFF09");
+      return;
+    }
+    if (h.totalSize > 64 * 1024 * 1024) {
+      h.close();
+      log(`\u964D\u7EA7\u653E\u5F03\uFF1A${Math.round(h.totalSize / 1048576)}MB \u592A\u5927\u4E0D\u6574\u4E0B\uFF08\u7EE7\u7EED\u7B49 SW \u6D3B\uFF09`);
+      return;
+    }
+    const bytes = await h.read(0, h.totalSize);
+    h.close();
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    blobUrl = URL.createObjectURL(new Blob([bytes], { type: MIME_BLOB[current.split(".").pop().toLowerCase()] ?? "application/octet-stream" }));
+    audio.src = blobUrl;
+    audio.currentTime = t;
+    void audio.play().then(() => log(`\u964D\u7EA7\u6210\u529F\uFF1Ablob \u7EED\u64AD\uFF08${t.toFixed(1)}s \u8D77\uFF09`)).catch((e) => log(`\u964D\u7EA7 play() \u62D2\u7EDD\uFF1A${e.message}`));
+  } catch (e) {
+    log(`\u964D\u7EA7\u5F02\u5E38\uFF1A${e.message}`);
+  }
+}
 function applyHeal(trigger) {
   const acts = decideHeal({ online: navigator.onLine, current, mode, hasError: !!audio.error, loopEngaged: audio.loop, nextReady });
   if (!acts.length) return;
+  if (acts.length === 1 && acts[0] === "rebuild" && Date.now() < recNextAt) return;
   log(`\u81EA\u6108\uFF08${trigger}\uFF09\uFF1A${acts.join("+")}`);
-  if (acts.includes("rebuild")) recoverPlayback(`${trigger}\uFF1A\u64AD\u653E\u9519\u8BEF\u6001\u4E14\u5728\u7EBF`);
+  if (acts.includes("rebuild")) void escalateRecovery(trigger);
   if (acts.includes("unloop")) {
     audio.loop = false;
     log("\u81EA\u6108\uFF1A\u89E3\u9664\u964D\u7EA7\u5355\u66F2\u5FAA\u73AF \u2192 \u6062\u590D\u987A\u5E8F\u63A5\u66F2");
