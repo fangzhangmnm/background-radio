@@ -17,7 +17,7 @@ import { startSwAuthBridge } from "../../../20260813 internal-store/src/sw/bridg
 import { CLIENT_ID, AUTHORITY, SCOPES } from "../../config.js";
 import { nextOf, resolveAvail, classifyNextReady, decideBoundary, decideStartPlayback, decideHeal, decideRecovery, retryDelayMs, type NextReady } from "./player-logic.ts";
 
-const SPIKE_V = "spike-11 · 2026-08-19";
+const SPIKE_V = "spike-12 · 2026-08-19";
 const APP_ID = "br-spike";
 const DB_NAME = `${APP_ID}.defaultStore`;
 const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -336,13 +336,16 @@ function renderList(): void {
     pin.textContent = kept ? "✕离线" : "留离线";
     pin.onclick = async () => {
       const f = store.file(name, { isZip: false, mode: "existing" });
-      if (kept) { try { await f.offload(); log(`已移除离线：${name}`); } catch (e) { log(`offload 拒绝：${(e as Error).message}`); } }
-      else {
-        const t0 = Date.now();
-        await f.keepOffline({ onProgress: (d, t) => { pinProgress.set(name, `${Math.round((d / t) * 100)}%`); renderList(); } });
-        pinProgress.delete(name);
-        log(`留离线完成：${name}（${((Date.now() - t0) / 1000).toFixed(1)}s）★若先播过应快（只补缺口）`);
-      }
+      try {
+        if (kept) { try { await f.offload(); log(`已移除离线：${name}`); } catch (e) { log(`offload 拒绝：${(e as Error).message}`); } }
+        else {
+          log(`留离线开始：${name}`);   // spike-12 埋点（四轮战报「已缓存点留离线没反应」——下次日志说话）
+          const t0 = Date.now();
+          await f.keepOffline({ onProgress: (d, t) => { pinProgress.set(name, `${Math.round((d / t) * 100)}%`); renderList(); } });
+          pinProgress.delete(name);
+          log(`留离线完成：${name}（${((Date.now() - t0) / 1000).toFixed(1)}s）★若先播过/已缓存应快（只补缺口）`);
+        }
+      } catch (e) { log(`🛑 留离线/移除异常：${name}：${(e as Error).message}`); pinProgress.delete(name); }
       renderList();
       // 可用性变了 → 重新边界备战（spike-9 二轮战例：备战后被移除离线 → 陈 flag 盲步进到零字节曲挂死）
       if (current && mode === "folder") void prefetchNextHead(current);
@@ -373,8 +376,11 @@ for (const r of document.querySelectorAll<HTMLInputElement>('input[name="mode"]'
 // ── 播种测试音频（桌面按一次；不同频率正弦波 → 换曲耳朵能听出来）────────────
 document.getElementById("seed")!.addEventListener("click", async () => {
   const specs: [string, number, number][] = [["甲-10秒-440Hz", 10, 440], ["乙-12秒-660Hz", 12, 660], ["丙-90秒-330Hz", 90, 330]];
+  // 批次后缀（spike-12）：每次点播种得到全新一组名字 → 天然的「无缓存」测试材料（配方：播种→✕离线→cloud-only 零缓存）
+  const t = new Date();
+  const batch = `${String(t.getHours()).padStart(2, "0")}${String(t.getMinutes()).padStart(2, "0")}`;
   for (const [label, secs, freq] of specs) {
-    const name = `spike-test/${label}.wav`;
+    const name = `spike-test/${label}-${batch}.wav`;
     try {
       const r = await store.file(name, { isZip: false, mode: "new" }).save(makeWav(secs, freq));
       log(`播种 ${name}：${r.pushed ? "已上云" : `只落本地（${r.reason}）`}`);

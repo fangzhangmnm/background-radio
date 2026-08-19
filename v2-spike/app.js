@@ -4142,7 +4142,7 @@ function decideHeal(i) {
 }
 
 // src/main.ts
-var SPIKE_V = "spike-11 \xB7 2026-08-19";
+var SPIKE_V = "spike-12 \xB7 2026-08-19";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -4519,21 +4519,27 @@ function renderList() {
     pin.textContent = kept ? "\u2715\u79BB\u7EBF" : "\u7559\u79BB\u7EBF";
     pin.onclick = async () => {
       const f = store.file(name, { isZip: false, mode: "existing" });
-      if (kept) {
-        try {
-          await f.offload();
-          log(`\u5DF2\u79FB\u9664\u79BB\u7EBF\uFF1A${name}`);
-        } catch (e) {
-          log(`offload \u62D2\u7EDD\uFF1A${e.message}`);
+      try {
+        if (kept) {
+          try {
+            await f.offload();
+            log(`\u5DF2\u79FB\u9664\u79BB\u7EBF\uFF1A${name}`);
+          } catch (e) {
+            log(`offload \u62D2\u7EDD\uFF1A${e.message}`);
+          }
+        } else {
+          log(`\u7559\u79BB\u7EBF\u5F00\u59CB\uFF1A${name}`);
+          const t0 = Date.now();
+          await f.keepOffline({ onProgress: (d, t) => {
+            pinProgress.set(name, `${Math.round(d / t * 100)}%`);
+            renderList();
+          } });
+          pinProgress.delete(name);
+          log(`\u7559\u79BB\u7EBF\u5B8C\u6210\uFF1A${name}\uFF08${((Date.now() - t0) / 1e3).toFixed(1)}s\uFF09\u2605\u82E5\u5148\u64AD\u8FC7/\u5DF2\u7F13\u5B58\u5E94\u5FEB\uFF08\u53EA\u8865\u7F3A\u53E3\uFF09`);
         }
-      } else {
-        const t0 = Date.now();
-        await f.keepOffline({ onProgress: (d, t) => {
-          pinProgress.set(name, `${Math.round(d / t * 100)}%`);
-          renderList();
-        } });
+      } catch (e) {
+        log(`\u{1F6D1} \u7559\u79BB\u7EBF/\u79FB\u9664\u5F02\u5E38\uFF1A${name}\uFF1A${e.message}`);
         pinProgress.delete(name);
-        log(`\u7559\u79BB\u7EBF\u5B8C\u6210\uFF1A${name}\uFF08${((Date.now() - t0) / 1e3).toFixed(1)}s\uFF09\u2605\u82E5\u5148\u64AD\u8FC7\u5E94\u5FEB\uFF08\u53EA\u8865\u7F3A\u53E3\uFF09`);
       }
       renderList();
       if (current && mode === "folder") void prefetchNextHead(current);
@@ -4560,8 +4566,10 @@ for (const r of document.querySelectorAll('input[name="mode"]')) {
 }
 document.getElementById("seed").addEventListener("click", async () => {
   const specs = [["\u7532-10\u79D2-440Hz", 10, 440], ["\u4E59-12\u79D2-660Hz", 12, 660], ["\u4E19-90\u79D2-330Hz", 90, 330]];
+  const t = /* @__PURE__ */ new Date();
+  const batch = `${String(t.getHours()).padStart(2, "0")}${String(t.getMinutes()).padStart(2, "0")}`;
   for (const [label, secs, freq] of specs) {
-    const name = `spike-test/${label}.wav`;
+    const name = `spike-test/${label}-${batch}.wav`;
     try {
       const r = await store.file(name, { isZip: false, mode: "new" }).save(makeWav(secs, freq));
       log(`\u64AD\u79CD ${name}\uFF1A${r.pushed ? "\u5DF2\u4E0A\u4E91" : `\u53EA\u843D\u672C\u5730\uFF08${r.reason}\uFF09`}`);
