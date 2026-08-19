@@ -4087,8 +4087,51 @@ var CLIENT_ID2 = "aa43a186-25cd-4140-ade9-c0abd6ce5cb6";
 var AUTHORITY2 = "https://login.microsoftonline.com/common";
 var SCOPES2 = ["Files.ReadWrite.AppFolder", "offline_access"];
 
+// src/player-logic.ts
+async function resolveAvail(f) {
+  if (await f.isKeptOffline()) return { kind: "local" };
+  const cov = await f.stagingCoverage();
+  return cov ? { kind: "staged", cov } : { kind: "none" };
+}
+function nextOf(tracks2, name) {
+  const i = tracks2.indexOf(name);
+  return i >= 0 && tracks2.length > 0 ? tracks2[(i + 1) % tracks2.length] : null;
+}
+function classifyNextReady(avail, headReadyBytes) {
+  if (avail.kind === "local") return "ready-full";
+  if (avail.kind === "staged") {
+    if (avail.cov.complete) return "ready-full";
+    if (avail.cov.headBytes >= headReadyBytes) return "ready-head";
+  }
+  return "need-fetch";
+}
+function decideBoundary(i) {
+  if (i.mode !== "folder" || !i.current) return { action: "none" };
+  const next = nextOf(i.tracks, i.current);
+  if (!next) return { action: "loop", reason: "\u65E0\u4E0B\u4E00\u66F2" };
+  if (i.nextReady?.name !== next) return { action: "loop", reason: `\u4E0B\u4E00\u66F2 ${next} \u672A\u5907\u6218/flag \u9648\u65E7` };
+  if (!i.online && !i.nextReady.full) return { action: "loop", reason: "\u4EC5\u5934\u90E8\u5907\u597D\u4E14\u79BB\u7EBF\u2014\u2014\u63A5\u4E86\u5FC5\u5361\u6B7B" };
+  return { action: "advance", to: next };
+}
+function decideStartPlayback(i) {
+  if (i.online) return { allow: true };
+  if (i.avail.kind === "local") return { allow: true };
+  if (i.avail.kind === "none") return { allow: true, note: "\u65E0\u7F13\u5B58\u76F4\u63A5\u8BD5\uFF08onLine \u53EF\u80FD\u4E0D\u53EF\u4FE1\uFF1B\u771F\u79BB\u7EBF\u4F1A\u7ACB\u523B\u660E\u8BF4\uFF09" };
+  if (i.avail.cov.complete) return { allow: true, note: "\u7F13\u5B58\u5B8C\u6574" };
+  return { allow: false, why: `\u7F13\u5B58\u4E0D\u5B8C\u6574 ${Math.round(i.avail.cov.bytes / i.avail.cov.totalBytes * 100)}%\uFF08\u6709\u6D1E\u2014\u2014\u9632\u5148\u54CD\u540E\u5361\u6B7B\uFF09` };
+}
+function decideHeal(i) {
+  const out = [];
+  if (!i.current || i.mode === "stop") return out;
+  if (i.hasError && i.online) out.push("rebuild");
+  if (i.mode !== "folder") return out;
+  if (i.loopEngaged && i.nextReady && (i.online || i.nextReady.full)) out.push("unloop");
+  if ((i.loopEngaged || !i.nextReady) && i.online) out.push("re-arm");
+  return out;
+}
+
 // src/main.ts
-var SPIKE_V = "spike-9 \xB7 2026-08-18";
+var SPIKE_V = "spike-10 \xB7 2026-08-19";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -4180,53 +4223,45 @@ var mode = "folder";
 var currentFolder = "";
 var tracks = [];
 var current = null;
-var nextHeadReady = null;
-function nextOf(name) {
-  const i = tracks.indexOf(name);
-  return i >= 0 && tracks.length > 0 ? tracks[(i + 1) % tracks.length] : null;
-}
+var nextReady = null;
 var fileOf = (name) => store.file(name, { isZip: false, mode: "existing" });
 var HEAD_READY_BYTES = 512 * 1024;
 async function prefetchNextHead(name) {
-  const next = nextOf(name);
-  nextHeadReady = null;
+  const next = nextOf(tracks, name);
+  nextReady = null;
   if (!next || mode !== "folder") return;
   try {
     const f = fileOf(next);
-    if (await f.isKeptOffline()) {
-      nextHeadReady = next;
-      log(`\u8FB9\u754C\u5907\u6218\uFF1A\u4E0B\u4E00\u66F2=\u672C\u5730\u526F\u672C\uFF08\u5DF2\u9489\uFF09\u2192 \u63A5\u66F2\u5C31\u7EEA\uFF1A${next}`);
-      return;
+    let lvl = classifyNextReady(await resolveAvail(f), HEAD_READY_BYTES);
+    if (lvl === "need-fetch") {
+      const h = await f.openStream();
+      if (!h) {
+        log(`\u8FB9\u754C\u5907\u6218\u5931\u8D25\uFF1A${next} \u62FF\u4E0D\u5230\uFF08${navigator.onLine ? "\u4E91\u7AEF\u89E3\u6790\u5931\u8D25" : "\u79BB\u7EBF\u4E14\u65E0\u7F13\u5B58"}\uFF09\u2192 \u5C4A\u65F6\u964D\u7EA7 loop`);
+        return;
+      }
+      await h.prefetch(0, 768 * 1024);
+      h.close();
+      lvl = classifyNextReady(await resolveAvail(f), HEAD_READY_BYTES);
+      if (lvl === "need-fetch") {
+        log(`\u8FB9\u754C\u5907\u6218\uFF1A\u9884\u62C9\u540E\u5934\u90E8\u4ECD\u4E0D\u8DB3\uFF08${next}\uFF09\u2192 \u5C4A\u65F6\u964D\u7EA7 loop`);
+        return;
+      }
     }
-    const cov = await f.stagingCoverage();
-    if (cov && (cov.complete || cov.headBytes >= HEAD_READY_BYTES)) {
-      nextHeadReady = next;
-      log(`\u8FB9\u754C\u5907\u6218\uFF1A\u4E0B\u4E00\u66F2\u5DF2\u5728\u7F13\u5B58\uFF08${cov.complete ? "\u5B8C\u6574" : `\u5934\u90E8 ${Math.round(cov.headBytes / 1024)}KB`}\uFF09\u2192 \u63A5\u66F2\u5C31\u7EEA\uFF1A${next}`);
-      return;
-    }
-    const h = await f.openStream();
-    if (!h) {
-      log(`\u8FB9\u754C\u5907\u6218\u5931\u8D25\uFF1A${next} \u62FF\u4E0D\u5230\uFF08${navigator.onLine ? "\u4E91\u7AEF\u89E3\u6790\u5931\u8D25" : "\u79BB\u7EBF\u4E14\u65E0\u7F13\u5B58"}\uFF09\u2192 \u5C4A\u65F6\u964D\u7EA7 loop`);
-      return;
-    }
-    await h.prefetch(0, 768 * 1024);
-    h.close();
-    nextHeadReady = next;
-    log(`\u8FB9\u754C\u5907\u6218\uFF1A\u4E0B\u4E00\u66F2\u5934\u90E8\u5DF2\u9884\u62C9 \u2192 \u63A5\u66F2\u5C31\u7EEA\uFF1A${next}`);
+    nextReady = { name: next, full: lvl === "ready-full" };
+    log(`\u8FB9\u754C\u5907\u6218\uFF1A${next} ${nextReady.full ? "\u5168\u91CF\u53EF\u63A5\uFF08\u79BB\u7EBF\u4E5F\u884C\uFF09" : "\u5934\u90E8\u5C31\u7EEA\uFF08\u5728\u7EBF\u53EF\u63A5\uFF09"}`);
   } catch (e) {
     log(`\u8FB9\u754C\u5907\u6218\u5F02\u5E38\uFF1A${String(e.message)} \u2192 \u5C4A\u65F6\u964D\u7EA7 loop`);
   }
 }
 async function play(name) {
-  if (!navigator.onLine && !await fileOf(name).isKeptOffline()) {
-    const cov = await fileOf(name).stagingCoverage();
-    if (!cov?.complete) {
-      const why = cov ? `\u7F13\u5B58\u4E0D\u5B8C\u6574 ${Math.round(cov.bytes / cov.totalBytes * 100)}%` : "\u65E0\u7F13\u5B58";
-      log(`\u26D4 \u79BB\u7EBF\u8D77\u64AD\u62D2\u7EDD\uFF1A${name}\uFF08${why}\uFF09\u2014\u2014\u9632\u5148\u54CD\u540E\u5361\u6B7B`);
-      nowEl.textContent = `\u26D4 \u79BB\u7EBF\u4E0D\u53EF\u64AD\uFF1A${name.split("/").pop()}\uFF08${why}\uFF09`;
+  if (!navigator.onLine) {
+    const d = decideStartPlayback({ online: false, avail: await resolveAvail(fileOf(name)) });
+    if (!d.allow) {
+      log(`\u26D4 \u79BB\u7EBF\u8D77\u64AD\u62D2\u7EDD\uFF1A${name}\uFF08${d.why}\uFF09`);
+      nowEl.textContent = `\u26D4 \u79BB\u7EBF\u4E0D\u53EF\u64AD\uFF1A${name.split("/").pop()}\uFF08${d.why}\uFF09`;
       return;
     }
-    log(`\u79BB\u7EBF\u8D77\u64AD\u653E\u884C\uFF1A${name}\uFF08\u7F13\u5B58\u5B8C\u6574\uFF09`);
+    if (d.note) log(`\u79BB\u7EBF\u8D77\u64AD\u653E\u884C\uFF1A${name}\uFF08${d.note}\uFF09`);
   }
   startPlayback(name);
 }
@@ -4241,30 +4276,29 @@ function startPlayback(name) {
   renderList();
 }
 audio.addEventListener("ended", () => {
-  log(`\u2605\u8FB9\u754C\u51B3\u7B56\uFF1Aended\uFF08mode=${mode}\uFF0C\u63A5\u66F2 flag=${nextHeadReady ?? "\u65E0"}\uFF0Conline=${navigator.onLine}\uFF09`);
-  if (mode !== "folder" || !current) return;
-  const next = nextOf(current);
-  if (next && nextHeadReady === next) {
-    current = next;
-    nextHeadReady = null;
-    audio.src = streamUrl(next);
-    void audio.play().then(() => log(`\u25B6 \u81EA\u52A8\u6B65\u8FDB\u6210\u529F\uFF1A${next}`)).catch((e) => log(`\u6B65\u8FDB play() \u62D2\u7EDD\uFF1A${e.message}`));
-    nowEl.textContent = `\u25B6 ${next}`;
-    setMediaSession(next);
-    void prefetchNextHead(next);
+  const d = decideBoundary({ mode, current, tracks, nextReady, online: navigator.onLine });
+  log(`\u2605\u8FB9\u754C\u51B3\u7B56\uFF1A${d.action}${d.action === "advance" ? `\u2192${d.to}` : d.action === "loop" ? `\uFF08${d.reason}\uFF09` : ""}\uFF08\u5907\u6218=${nextReady ? `${nextReady.name}\xB7${nextReady.full ? "\u5168\u91CF" : "\u4EC5\u5934"}` : "\u65E0"}\uFF0Conline=${navigator.onLine}\uFF09`);
+  if (d.action === "advance") {
+    current = d.to;
+    nextReady = null;
+    audio.src = streamUrl(d.to);
+    void audio.play().then(() => log(`\u25B6 \u81EA\u52A8\u6B65\u8FDB\u6210\u529F\uFF1A${d.to}`)).catch((e) => log(`\u6B65\u8FDB play() \u62D2\u7EDD\uFF1A${e.message}`));
+    nowEl.textContent = `\u25B6 ${d.to}`;
+    setMediaSession(d.to);
+    void prefetchNextHead(d.to);
     renderList();
-  } else {
+  } else if (d.action === "loop") {
     audio.loop = true;
     void audio.play().catch(() => {
     });
-    log(`\u2605\u8FB9\u754C\u51B3\u7B56\uFF1A\u964D\u7EA7 audio.loop \u5355\u66F2\u5FAA\u73AF\uFF08${next ? `\u4E0B\u4E00\u66F2 ${next} \u672A\u5C31\u7EEA` : "\u65E0\u4E0B\u4E00\u66F2"}\uFF09\u2014\u2014\u56DE\u524D\u53F0/\u56DE\u7EBF\u81EA\u6108\u89E3\u9664`);
+    log("\u2605\u964D\u7EA7 audio.loop \u5355\u66F2\u5FAA\u73AF\u2014\u2014\u81EA\u6108\u89E3\u9664");
   }
 });
 for (const ev of ["error", "stalled", "waiting", "playing", "pause"]) {
   audio.addEventListener(ev, () => log(`audio \u4E8B\u4EF6\uFF1A${ev}${ev === "error" ? ` code=${audio.error?.code}` : ""}`));
 }
 audio.addEventListener("error", () => {
-  if (!navigator.onLine && current) nowEl.textContent = `\u26A0 \u64AD\u653E\u4E2D\u65AD\uFF1A\u79BB\u7EBF\u4E14\u7F13\u5B58\u4E0D\u5B8C\u6574\uFF08${current.split("/").pop()}\uFF09\u2014\u2014\u56DE\u7EBF\u540E\u81EA\u52A8\u7EED`;
+  if (current) nowEl.textContent = `\u26A0 \u64AD\u653E\u5931\u8D25\uFF1A${current.split("/").pop()}\uFF08${navigator.onLine ? "\u62FF\u4E0D\u5230\u5B57\u8282\uFF0C\u4E91\u7AEF\u4E0D\u53EF\u8FBE\uFF1F" : "\u79BB\u7EBF\u4E14\u673A\u4E0A\u65E0\u6B64\u66F2\u5B57\u8282"}\uFF09\u2014\u2014\u56DE\u7EBF\u81EA\u52A8\u91CD\u8BD5`;
 });
 var lastMediaWall = 0;
 audio.addEventListener("timeupdate", () => {
@@ -4281,34 +4315,58 @@ function recoverPlayback(reason) {
     nowEl.textContent = `\u25B6 ${current}`;
   }).catch((e) => log(`\u81EA\u6108 play() \u62D2\u7EDD\uFF1A${e.message}`));
 }
+function applyHeal(trigger) {
+  const acts = decideHeal({ online: navigator.onLine, current, mode, hasError: !!audio.error, loopEngaged: audio.loop, nextReady });
+  if (!acts.length) return;
+  log(`\u81EA\u6108\uFF08${trigger}\uFF09\uFF1A${acts.join("+")}`);
+  if (acts.includes("rebuild")) recoverPlayback(`${trigger}\uFF1A\u64AD\u653E\u9519\u8BEF\u6001\u4E14\u5728\u7EBF`);
+  if (acts.includes("unloop")) {
+    audio.loop = false;
+    log("\u81EA\u6108\uFF1A\u89E3\u9664\u964D\u7EA7\u5355\u66F2\u5FAA\u73AF \u2192 \u6062\u590D\u987A\u5E8F\u63A5\u66F2");
+  }
+  if (acts.includes("re-arm") && current) {
+    void prefetchNextHead(current).then(() => {
+      const again = decideHeal({ online: navigator.onLine, current, mode, hasError: !!audio.error, loopEngaged: audio.loop, nextReady });
+      if (again.includes("unloop")) {
+        audio.loop = false;
+        log("\u81EA\u6108\uFF1A\u5907\u6218\u5B8C\u6210 \u2192 \u89E3\u9664\u964D\u7EA7\u5355\u66F2\u5FAA\u73AF");
+      }
+    });
+  }
+}
 function healCheck(trigger) {
   log(`\u81EA\u6108\u68C0\u67E5\uFF08${trigger}\uFF0Conline=${navigator.onLine}\uFF09`);
   if (navigator.onLine && lastSnap) watch(currentFolder);
   if (!current || mode === "stop") return;
-  if (navigator.onLine) {
-    if (audio.error) recoverPlayback(`audio.error code=${audio.error.code}`);
-    else if (!audio.paused) {
-      const wall0 = lastMediaWall;
-      setTimeout(() => {
-        if (!navigator.onLine || !current || audio.paused) return;
-        if (lastMediaWall === wall0) recoverPlayback("\u56DE\u7EBF 2.5s \u65E0\u64AD\u653E\u8FDB\u5EA6\uFF08stall\uFF09");
-        else log("\u81EA\u6108\u68C0\u67E5\uFF1A\u64AD\u653E\u5728\u8D70\uFF0C\u65E0\u9700\u91CD\u5EFA");
-      }, 2500);
-    }
+  if (navigator.onLine && !audio.error && !audio.paused) {
+    const wall0 = lastMediaWall;
+    setTimeout(() => {
+      if (!navigator.onLine || !current || audio.paused) return;
+      if (lastMediaWall === wall0) recoverPlayback("\u56DE\u7EBF 2.5s \u65E0\u64AD\u653E\u8FDB\u5EA6\uFF08stall\uFF09");
+      else log("\u81EA\u6108\u68C0\u67E5\uFF1A\u64AD\u653E\u5728\u8D70\uFF0C\u65E0\u9700\u91CD\u5EFA");
+    }, 2500);
   }
-  if (mode === "folder") {
-    void prefetchNextHead(current).then(() => {
-      if (audio.loop && nextHeadReady) {
-        audio.loop = false;
-        log("\u81EA\u6108\uFF1A\u89E3\u9664\u964D\u7EA7\u5355\u66F2\u5FAA\u73AF \u2192 \u6062\u590D\u987A\u5E8F\u63A5\u66F2");
-      }
-    });
-  }
+  applyHeal(trigger);
 }
 addEventListener("online", () => healCheck("online \u4E8B\u4EF6"));
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) healCheck("\u56DE\u524D\u53F0");
 });
+var stallStrikes = 0;
+var lastWallSeen = -1;
+setInterval(() => {
+  if (!current || mode === "stop") return;
+  applyHeal("watchdog");
+  if (navigator.onLine && !audio.paused && !audio.error) {
+    if (lastMediaWall === lastWallSeen) {
+      if (++stallStrikes >= 2) {
+        stallStrikes = 0;
+        recoverPlayback("watchdog\uFF1A\u226516s \u65E0\u64AD\u653E\u8FDB\u5EA6");
+      }
+    } else stallStrikes = 0;
+    lastWallSeen = lastMediaWall;
+  } else stallStrikes = 0;
+}, 8e3);
 function setMediaSession(name) {
   if (!("mediaSession" in navigator)) return;
   try {
@@ -4316,7 +4374,7 @@ function setMediaSession(name) {
     navigator.mediaSession.setActionHandler("play", () => void audio.play());
     navigator.mediaSession.setActionHandler("pause", () => audio.pause());
     navigator.mediaSession.setActionHandler("nexttrack", () => {
-      const n = current && nextOf(current);
+      const n = current && nextOf(tracks, current);
       if (n) void play(n);
     });
   } catch {
@@ -4398,6 +4456,7 @@ function renderList() {
         log(`\u7559\u79BB\u7EBF\u5B8C\u6210\uFF1A${name}\uFF08${((Date.now() - t0) / 1e3).toFixed(1)}s\uFF09\u2605\u82E5\u5148\u64AD\u8FC7\u5E94\u5FEB\uFF08\u53EA\u8865\u7F3A\u53E3\uFF09`);
       }
       renderList();
+      if (current && mode === "folder") void prefetchNextHead(current);
     };
     row.append(pin);
     listEl.append(row);

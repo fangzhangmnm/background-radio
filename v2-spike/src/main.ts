@@ -5,11 +5,16 @@
 // spike-9（2026-08-18 iPad 战报回炉，user 拍板）：① staging 透明护栏——三态徽章 + 离线起播「能播=能播完」
 // + 播中撞洞 surface；② 边界备战三级（本地/coverage/预拉，前两级离线可判——「循环乙」谜底=预拉离线必败）；
 // ③ 回前台/回线自愈（解除降级循环 + stall/error 重建）；④ 日志毫秒戳 + 边界决策日志。
+// spike-10（2026-08-19 iPad 二轮战报）：① 自愈加 8s 看门狗（战例：前台亮屏开回 wifi，online/visibility
+// 事件全没来 → 谁都没触发自愈）；② 护栏收窄——「无缓存」不拦直接试（没缓存不存在先响后卡死；
+// iOS onLine 有说谎前科，拦了会误伤真在线）；③ 接曲 flag 带全量/仅头语义 + pin/移除后重备战
+// （战例：备战后被移除离线 → 陈 flag 盲步进到零字节曲 → 播放挂死）。
 import { createStore, createOneDriveProvider } from "../../../20260813 internal-store/src/index.ts";
 import { startSwAuthBridge } from "../../../20260813 internal-store/src/sw/bridge.ts";
 import { CLIENT_ID, AUTHORITY, SCOPES } from "../../config.js";
+import { nextOf, resolveAvail, classifyNextReady, decideBoundary, decideStartPlayback, decideHeal, type NextReady } from "./player-logic.ts";
 
-const SPIKE_V = "spike-9 · 2026-08-18";
+const SPIKE_V = "spike-10 · 2026-08-19";
 const APP_ID = "br-spike";
 const DB_NAME = `${APP_ID}.defaultStore`;
 const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -82,49 +87,42 @@ let mode: "single" | "folder" | "stop" = "folder";
 let currentFolder = "";
 let tracks: string[] = [];            // 当前夹音频文件（列表序）
 let current: string | null = null;
-let nextHeadReady: string | null = null;   // 「下一曲头部已 staged」同步 flag（ended 里零异步可判）
+let nextReady: NextReady = null;   // 边界备战 flag（ended 里零异步可判；full=离线也可接。语义见 player-logic）
 
-function nextOf(name: string): string | null {
-  const i = tracks.indexOf(name);
-  return i >= 0 && tracks.length > 0 ? tracks[(i + 1) % tracks.length] : null;
-}
 const fileOf = (name: string) => store.file(name, { isZip: false, mode: "existing" });
-const HEAD_READY_BYTES = 512 * 1024;   // 头部备到这个量就算「接曲就绪」（≈几秒声，够页面复活接力）
-// 边界备战（spike-9 改三级：本地副本 → staging coverage → 现拉预取）。前两级零网络 → **离线也能备战**
-// （spike-8 战例：飞行中预拉走云端 fetchMeta 必败 → 明明下一曲全在缓存也降级 loop——「循环乙」谜底）。
+const HEAD_READY_BYTES = 512 * 1024;   // 头部备到这个量就算「在线可接」（≈几秒声，够页面复活接力）
+// 边界备战（决策纯函数在 player-logic，已 mock 测）：本地/coverage 零网络离线可判 → 现拉预取兜底。
+// spike-8 战例：预拉只走云端 fetchMeta 离线必败 → 下一曲明明全在机上也降级 loop（「循环乙」谜底）。
 async function prefetchNextHead(name: string): Promise<void> {
-  const next = nextOf(name);
-  nextHeadReady = null;
+  const next = nextOf(tracks, name);
+  nextReady = null;
   if (!next || mode !== "folder") return;
   try {
     const f = fileOf(next);
-    if (await f.isKeptOffline()) { nextHeadReady = next; log(`边界备战：下一曲=本地副本（已钉）→ 接曲就绪：${next}`); return; }
-    const cov = await f.stagingCoverage();
-    if (cov && (cov.complete || cov.headBytes >= HEAD_READY_BYTES)) {
-      nextHeadReady = next;
-      log(`边界备战：下一曲已在缓存（${cov.complete ? "完整" : `头部 ${Math.round(cov.headBytes / 1024)}KB`}）→ 接曲就绪：${next}`);
-      return;
+    let lvl = classifyNextReady(await resolveAvail(f), HEAD_READY_BYTES);
+    if (lvl === "need-fetch") {
+      const h = await f.openStream();
+      if (!h) { log(`边界备战失败：${next} 拿不到（${navigator.onLine ? "云端解析失败" : "离线且无缓存"}）→ 届时降级 loop`); return; }
+      await h.prefetch(0, 768 * 1024);
+      h.close();
+      lvl = classifyNextReady(await resolveAvail(f), HEAD_READY_BYTES);   // 预拉后重判（小文件可能已全量入缓存）
+      if (lvl === "need-fetch") { log(`边界备战：预拉后头部仍不足（${next}）→ 届时降级 loop`); return; }
     }
-    const h = await f.openStream();
-    if (!h) { log(`边界备战失败：${next} 拿不到（${navigator.onLine ? "云端解析失败" : "离线且无缓存"}）→ 届时降级 loop`); return; }
-    await h.prefetch(0, 768 * 1024);
-    h.close();
-    nextHeadReady = next;
-    log(`边界备战：下一曲头部已预拉 → 接曲就绪：${next}`);
+    nextReady = { name: next, full: lvl === "ready-full" };
+    log(`边界备战：${next} ${nextReady.full ? "全量可接（离线也行）" : "头部就绪（在线可接）"}`);
   } catch (e) { log(`边界备战异常：${String((e as Error).message)} → 届时降级 loop`); }
 }
-// 离线起播护栏（spike-9，user 拍板）：「能播」必须等于「能播完」——已钉/完整缓存才起播，
-// 有洞/无缓存直接说清楚，绝不「头部先响 → 播到洞静默卡死」。
+// 离线起播护栏（决策在 player-logic.decideStartPlayback，已 mock 测）：只拦「有洞的部分缓存」；
+// 无缓存直接试（没缓存不存在先响后卡死；iOS onLine 有说谎前科，拦了会误伤真在线——spike-9 二轮战例）。
 async function play(name: string): Promise<void> {
-  if (!navigator.onLine && !(await fileOf(name).isKeptOffline())) {
-    const cov = await fileOf(name).stagingCoverage();
-    if (!cov?.complete) {
-      const why = cov ? `缓存不完整 ${Math.round((cov.bytes / cov.totalBytes) * 100)}%` : "无缓存";
-      log(`⛔ 离线起播拒绝：${name}（${why}）——防先响后卡死`);
-      nowEl.textContent = `⛔ 离线不可播：${name.split("/").pop()}（${why}）`;
+  if (!navigator.onLine) {
+    const d = decideStartPlayback({ online: false, avail: await resolveAvail(fileOf(name)) });
+    if (!d.allow) {
+      log(`⛔ 离线起播拒绝：${name}（${d.why}）`);
+      nowEl.textContent = `⛔ 离线不可播：${name.split("/").pop()}（${d.why}）`;
       return;
     }
-    log(`离线起播放行：${name}（缓存完整）`);
+    if (d.note) log(`离线起播放行：${name}（${d.note}）`);
   }
   startPlayback(name);
 }
@@ -138,30 +136,30 @@ function startPlayback(name: string): void {
   void prefetchNextHead(name);
   renderList();
 }
-audio.addEventListener("ended", () => {                       // ★被测主角：后台边界。此处**零异步**。
-  log(`★边界决策：ended（mode=${mode}，接曲 flag=${nextHeadReady ?? "无"}，online=${navigator.onLine}）`);
-  if (mode !== "folder" || !current) return;
-  const next = nextOf(current);
-  if (next && nextHeadReady === next) {
-    current = next; nextHeadReady = null;
-    audio.src = streamUrl(next);                              // 同步换 src + play：SW 从 staging 答头部 → 声音先响 → 页面复活
-    void audio.play().then(() => log(`▶ 自动步进成功：${next}`)).catch((e) => log(`步进 play() 拒绝：${e.message}`));
-    nowEl.textContent = `▶ ${next}`;
-    setMediaSession(next);
-    void prefetchNextHead(next);
+audio.addEventListener("ended", () => {                       // ★被测主角：后台边界。此处**零异步**（决策纯函数已 mock 测）。
+  const d = decideBoundary({ mode, current, tracks, nextReady, online: navigator.onLine });
+  log(`★边界决策：${d.action}${d.action === "advance" ? `→${d.to}` : d.action === "loop" ? `（${d.reason}）` : ""}` +
+      `（备战=${nextReady ? `${nextReady.name}·${nextReady.full ? "全量" : "仅头"}` : "无"}，online=${navigator.onLine}）`);
+  if (d.action === "advance") {
+    current = d.to; nextReady = null;
+    audio.src = streamUrl(d.to);                              // 同步换 src + play：SW 从 staging/本地答头部 → 声音先响 → 页面复活
+    void audio.play().then(() => log(`▶ 自动步进成功：${d.to}`)).catch((e) => log(`步进 play() 拒绝：${e.message}`));
+    nowEl.textContent = `▶ ${d.to}`;
+    setMediaSession(d.to);
+    void prefetchNextHead(d.to);
     renderList();
-  } else {
-    audio.loop = true;                                        // 降级：单曲循环（loop=true 后 ended 不再触发 → 只能靠自愈检查解除）
+  } else if (d.action === "loop") {
+    audio.loop = true;                                        // 降级：单曲循环（loop=true 后 ended 不再触发 → 只能靠自愈解除）
     void audio.play().catch(() => {});
-    log(`★边界决策：降级 audio.loop 单曲循环（${next ? `下一曲 ${next} 未就绪` : "无下一曲"}）——回前台/回线自愈解除`);
+    log("★降级 audio.loop 单曲循环——自愈解除");
   }
 });
 for (const ev of ["error", "stalled", "waiting", "playing", "pause"] as const) {
   audio.addEventListener(ev, () => log(`audio 事件：${ev}${ev === "error" ? ` code=${audio.error?.code}` : ""}`));
 }
-// 播中撞洞 surface（护栏漏网的最后一道）：离线 + 播放错误 → 说人话，绝不静默停。
+// 播放失败 surface（护栏漏网的最后一道）：说人话，绝不静默停。回线后 watchdog/事件自愈会重建。
 audio.addEventListener("error", () => {
-  if (!navigator.onLine && current) nowEl.textContent = `⚠ 播放中断：离线且缓存不完整（${current.split("/").pop()}）——回线后自动续`;
+  if (current) nowEl.textContent = `⚠ 播放失败：${current.split("/").pop()}（${navigator.onLine ? "拿不到字节，云端不可达？" : "离线且机上无此曲字节"}）——回线自动重试`;
 });
 
 // ── 自愈（spike-9）：回前台 / 回线统一检查 ─────────────────────────────────
@@ -177,36 +175,55 @@ function recoverPlayback(reason: string): void {
   audio.currentTime = t;
   void audio.play().then(() => { log("自愈：播放已续上"); nowEl.textContent = `▶ ${current}`; }).catch((e) => log(`自愈 play() 拒绝：${e.message}`));
 }
+// 自愈动作执行器（决策在 player-logic.decideHeal，已 mock 测；此处只翻译成副作用，幂等）。
+function applyHeal(trigger: string): void {
+  const acts = decideHeal({ online: navigator.onLine, current, mode, hasError: !!audio.error, loopEngaged: audio.loop, nextReady });
+  if (!acts.length) return;
+  log(`自愈（${trigger}）：${acts.join("+")}`);
+  if (acts.includes("rebuild")) recoverPlayback(`${trigger}：播放错误态且在线`);
+  if (acts.includes("unloop")) { audio.loop = false; log("自愈：解除降级单曲循环 → 恢复顺序接曲"); }
+  if (acts.includes("re-arm") && current) {
+    void prefetchNextHead(current).then(() => {
+      const again = decideHeal({ online: navigator.onLine, current, mode, hasError: !!audio.error, loopEngaged: audio.loop, nextReady });
+      if (again.includes("unloop")) { audio.loop = false; log("自愈：备战完成 → 解除降级单曲循环"); }
+    });
+  }
+}
 function healCheck(trigger: string): void {
   log(`自愈检查（${trigger}，online=${navigator.onLine}）`);
   if (navigator.onLine && lastSnap) watch(currentFolder);     // 重订阅拿新云帧（列表/徽章归真）
   if (!current || mode === "stop") return;
-  if (navigator.onLine) {
-    if (audio.error) recoverPlayback(`audio.error code=${audio.error.code}`);
-    else if (!audio.paused) {
-      const wall0 = lastMediaWall;                            // 观察窗：回线 2.5s 仍无播放进度 = stall 死了 → 重建
-      setTimeout(() => {
-        if (!navigator.onLine || !current || audio.paused) return;
-        if (lastMediaWall === wall0) recoverPlayback("回线 2.5s 无播放进度（stall）");
-        else log("自愈检查：播放在走，无需重建");
-      }, 2500);
-    }
+  if (navigator.onLine && !audio.error && !audio.paused) {
+    const wall0 = lastMediaWall;                              // 观察窗：回线 2.5s 仍无播放进度 = stall 死了 → 重建
+    setTimeout(() => {
+      if (!navigator.onLine || !current || audio.paused) return;
+      if (lastMediaWall === wall0) recoverPlayback("回线 2.5s 无播放进度（stall）");
+      else log("自愈检查：播放在走，无需重建");
+    }, 2500);
   }
-  if (mode === "folder") {
-    void prefetchNextHead(current).then(() => {               // 重新备战边界（离线期间可能没备上）
-      if (audio.loop && nextHeadReady) { audio.loop = false; log("自愈：解除降级单曲循环 → 恢复顺序接曲"); }
-    });
-  }
+  applyHeal(trigger);
 }
 addEventListener("online", () => healCheck("online 事件"));
 document.addEventListener("visibilitychange", () => { if (!document.hidden) healCheck("回前台"); });
+// 8s 看门狗（spike-9 二轮战例：前台亮屏开回 wifi，online/visibility 事件全没来 → 谁都没触发自愈）。
+// 决策幂等：稳态空转零动作；另带播放无进度监工（在线、非暂停、连续两拍无 timeupdate → 重建）。
+let stallStrikes = 0, lastWallSeen = -1;
+setInterval(() => {
+  if (!current || mode === "stop") return;
+  applyHeal("watchdog");
+  if (navigator.onLine && !audio.paused && !audio.error) {
+    if (lastMediaWall === lastWallSeen) { if (++stallStrikes >= 2) { stallStrikes = 0; recoverPlayback("watchdog：≥16s 无播放进度"); } }
+    else stallStrikes = 0;
+    lastWallSeen = lastMediaWall;
+  } else stallStrikes = 0;
+}, 8000);
 function setMediaSession(name: string): void {
   if (!("mediaSession" in navigator)) return;
   try {
     navigator.mediaSession.metadata = new MediaMetadata({ title: name.split("/").pop(), artist: "BR spike" });
     navigator.mediaSession.setActionHandler("play", () => void audio.play());
     navigator.mediaSession.setActionHandler("pause", () => audio.pause());
-    navigator.mediaSession.setActionHandler("nexttrack", () => { const n = current && nextOf(current); if (n) void play(n); });
+    navigator.mediaSession.setActionHandler("nexttrack", () => { const n = current && nextOf(tracks, current); if (n) void play(n); });
   } catch { /* 部分 handler 不支持无妨 */ }
 }
 
@@ -272,6 +289,8 @@ function renderList(): void {
         log(`留离线完成：${name}（${((Date.now() - t0) / 1000).toFixed(1)}s）★若先播过应快（只补缺口）`);
       }
       renderList();
+      // 可用性变了 → 重新边界备战（spike-9 二轮战例：备战后被移除离线 → 陈 flag 盲步进到零字节曲挂死）
+      if (current && mode === "folder") void prefetchNextHead(current);
     };
     row.append(pin);
     listEl.append(row);
