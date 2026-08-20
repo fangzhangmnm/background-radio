@@ -17,7 +17,7 @@ import { startSwAuthBridge } from "../../../20260813 internal-store/src/sw/bridg
 import { CLIENT_ID, AUTHORITY, SCOPES } from "../../config.js";
 import { nextOf, resolveAvail, classifyNextReady, decideBoundary, decideStartPlayback, decideHeal, decideRecovery, retryDelayMs, type NextReady } from "./player-logic.ts";
 
-const SPIKE_V = "spike-13 · 2026-08-19";
+const SPIKE_V = "spike-14 · 2026-08-20";
 const APP_ID = "br-spike";
 const DB_NAME = `${APP_ID}.defaultStore`;
 const AUDIO_EXT = new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -170,12 +170,12 @@ audio.addEventListener("error", () => {
 //   一进就出不来；② 离线期间 stall/error 的 <audio> 回线不会自己重建。都得靠事件驱动的检查拉回来。
 let lastMediaWall = 0;
 audio.addEventListener("timeupdate", () => { lastMediaWall = Date.now(); });
+// 复播规则（2026-08-20 user 拍板）：点曲/接曲/循环/自愈重建一律**从 0 开始**；唯一的「中间复播」
+// = 新开 app 恢复上次位置（BR 正式版做，spike 不做）。中途保位置复播已判定是坏 feature，删。
 function recoverPlayback(reason: string): void {
   if (!current) return;
-  const t = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
-  log(`自愈：重建播放（${reason}，位置 ${t.toFixed(1)}s）：${current}`);
+  log(`自愈：重建播放（${reason}，从头播）：${current}`);
   audio.src = streamUrl(current);
-  audio.currentTime = t;
   void audio.play().then(() => { log("自愈：播放已续上"); nowEl.textContent = `▶ ${current}`; }).catch((e) => log(`自愈 play() 拒绝：${e.message}`));
 }
 // ── 错误恢复升级链（spike-11；决策 player-logic.decideRecovery，已 mock 测）────────────────
@@ -213,7 +213,6 @@ async function escalateRecovery(trigger: string): Promise<void> {
 }
 async function blobFallbackPlay(): Promise<void> {
   if (!current) return;
-  const t = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
   log(`降级：页面直下整曲播 blob：${current}`);
   try {
     const h = await fileOf(current).openStream();
@@ -224,8 +223,7 @@ async function blobFallbackPlay(): Promise<void> {
     if (blobUrl) URL.revokeObjectURL(blobUrl);
     blobUrl = URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: MIME_BLOB[current.split(".").pop()!.toLowerCase()] ?? "application/octet-stream" }));
     audio.src = blobUrl;
-    audio.currentTime = t;
-    void audio.play().then(() => log(`降级成功：blob 续播（${t.toFixed(1)}s 起）`)).catch((e) => log(`降级 play() 拒绝：${e.message}`));
+    void audio.play().then(() => log("降级成功：blob 播放（从头播——2026-08-20 复播规则）")).catch((e) => log(`降级 play() 拒绝：${e.message}`));
   } catch (e) { log(`降级异常：${(e as Error).message}`); }
 }
 

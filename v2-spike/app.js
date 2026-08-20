@@ -3551,6 +3551,7 @@ function createStore(config) {
 var graph_exports = {};
 __export(graph_exports, {
   clearFolderCaches: () => clearFolderCaches,
+  configureGraphTokenSource: () => configureGraphTokenSource,
   deleteItem: () => deleteItem,
   downloadItemBlob: () => downloadItemBlob,
   downloadItemRange: () => downloadItemRange,
@@ -3565,6 +3566,264 @@ __export(graph_exports, {
   renameItem: () => renameItem,
   uploadFileToApproot: () => uploadFileToApproot
 });
+var _tokenSource = null;
+function configureGraphTokenSource(fn) {
+  _tokenSource = fn;
+}
+async function getToken() {
+  if (!_tokenSource) throw new Error("graph token source \u672A\u914D\u7F6E\uFF08\u9875\u9762\u8D70 createOneDriveProvider\uFF1BSW \u8D70 configureGraphTokenSource(createBridgeTokenSource(dbName))\uFF09");
+  return _tokenSource();
+}
+var GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+var SIMPLE_UPLOAD_LIMIT = 4 * 1024 * 1024;
+function encodeSeg(name) {
+  return encodeURIComponent(name).replace(/'/g, "%27");
+}
+function encodeApprootPath(path) {
+  return path.split("/").filter(Boolean).map(encodeSeg).join("/");
+}
+async function graphFetch(method, pathOrUrl, { headers = {}, body = null } = {}) {
+  const token = await getToken();
+  const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${GRAPH_BASE}${pathOrUrl}`;
+  const init = { method, headers: { Authorization: `Bearer ${token}`, ...headers } };
+  if (body != null) {
+    if (typeof body === "string" || body instanceof ArrayBuffer || ArrayBuffer.isView(body) || body instanceof Blob) {
+      init.body = body;
+    } else {
+      init.body = JSON.stringify(body);
+      if (!init.headers["Content-Type"]) init.headers["Content-Type"] = "application/json";
+    }
+  }
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    let detail = "";
+    try {
+      detail = await response.text();
+    } catch (_) {
+    }
+    const err = new Error(`Graph ${method} ${pathOrUrl} \u2192 ${response.status}: ${detail}`);
+    err.status = response.status;
+    err.body = detail;
+    throw err;
+  }
+  return response;
+}
+async function listChildren(subfolder = "") {
+  const pathPart = subfolder ? `:/${encodeApprootPath(subfolder)}:` : "";
+  const items = [];
+  let next = `/me/drive/special/approot${pathPart}/children?$top=200&$select=id,name,size,eTag,createdDateTime,lastModifiedDateTime,file,folder,@microsoft.graph.downloadUrl`;
+  while (next) {
+    let response;
+    try {
+      response = await graphFetch("GET", next);
+    } catch (e) {
+      if (e.status === 404 && subfolder) return [];
+      throw e;
+    }
+    const page = await response.json();
+    items.push(...page.value ?? []);
+    next = page["@odata.nextLink"] ?? null;
+  }
+  return items;
+}
+async function getItemByPath(path) {
+  try {
+    const r = await graphFetch(
+      "GET",
+      `/me/drive/special/approot:/${encodeApprootPath(path)}?$select=id,name,size,eTag,lastModifiedDateTime,folder,@microsoft.graph.downloadUrl`
+    );
+    return await r.json();
+  } catch (e) {
+    if (e.status === 404) return null;
+    throw e;
+  }
+}
+async function downloadItemBlob(itemId) {
+  const dl = await getDownloadUrl(itemId);
+  if (dl) {
+    const r2 = await fetch(dl);
+    if (!r2.ok) throw new Error(`downloadUrl failed ${r2.status}`);
+    return await r2.blob();
+  }
+  const r = await graphFetch("GET", `/me/drive/items/${itemId}/content`);
+  return await r.blob();
+}
+var _dlUrlCache = /* @__PURE__ */ new Map();
+async function downloadItemRange(itemId, offset, length) {
+  let url = _dlUrlCache.get(itemId) ?? await getDownloadUrl(itemId);
+  if (url) {
+    _dlUrlCache.set(itemId, url);
+    try {
+      return await downloadRangeFromUrl(url, offset, length);
+    } catch (_e) {
+      _dlUrlCache.delete(itemId);
+      url = await getDownloadUrl(itemId);
+      if (url) {
+        _dlUrlCache.set(itemId, url);
+        return await downloadRangeFromUrl(url, offset, length);
+      }
+    }
+  }
+  const r = await graphFetch("GET", `/me/drive/items/${itemId}/content`, { headers: { Range: _rangeHeader(offset, length) } });
+  return await r.arrayBuffer();
+}
+function _rangeHeader(offset, length) {
+  return offset == null ? `bytes=-${length}` : `bytes=${offset}-${offset + length - 1}`;
+}
+async function downloadRangeFromUrl(downloadUrl, offset, length) {
+  const r = await fetch(downloadUrl, { headers: { Range: _rangeHeader(offset, length) } });
+  if (!r.ok && r.status !== 206) {
+    const err = new Error(`range download failed ${r.status}`);
+    err.status = r.status;
+    throw err;
+  }
+  return await r.arrayBuffer();
+}
+async function getDownloadUrl(itemId) {
+  const r = await graphFetch("GET", `/me/drive/items/${itemId}`);
+  const j = await r.json();
+  return j["@microsoft.graph.downloadUrl"] || null;
+}
+async function uploadFileToApproot(path, blob, contentType = "application/octet-stream", { conflictBehavior = "replace", eTag = null } = {}) {
+  const headers = { "Content-Type": contentType };
+  if (eTag) headers["If-Match"] = eTag;
+  if (blob.size <= SIMPLE_UPLOAD_LIMIT) {
+    const r = await graphFetch(
+      "PUT",
+      `/me/drive/special/approot:/${encodeApprootPath(path)}:/content?@microsoft.graph.conflictBehavior=${conflictBehavior}`,
+      { headers, body: blob }
+    );
+    return r.json();
+  }
+  const sessR = await graphFetch(
+    "POST",
+    `/me/drive/special/approot:/${encodeApprootPath(path)}:/createUploadSession`,
+    {
+      body: {
+        item: {
+          "@microsoft.graph.conflictBehavior": conflictBehavior,
+          name: path.split("/").pop()
+        }
+      },
+      headers: eTag ? { "If-Match": eTag } : void 0
+    }
+  );
+  const { uploadUrl } = await sessR.json();
+  const CHUNK = 5 * 1024 * 1024;
+  let offset = 0;
+  let last = null;
+  while (offset < blob.size) {
+    const end = Math.min(offset + CHUNK, blob.size) - 1;
+    const chunk = blob.slice(offset, end + 1);
+    const r = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Length": String(chunk.size),
+        "Content-Range": `bytes ${offset}-${end}/${blob.size}`
+      },
+      body: chunk
+    });
+    if (!r.ok && r.status !== 202) {
+      const err = new Error(`chunked upload failed ${r.status}`);
+      err.status = r.status;
+      throw err;
+    }
+    last = await r.json().then((j) => j).catch(() => null);
+    offset = end + 1;
+  }
+  return last;
+}
+async function deleteItem(itemId, eTag) {
+  await graphFetch("DELETE", `/me/drive/items/${itemId}`, eTag ? { headers: { "If-Match": eTag } } : {});
+}
+var _approotIdCache = null;
+var _subfolderIdCache = /* @__PURE__ */ new Map();
+function clearFolderCaches() {
+  _approotIdCache = null;
+  _subfolderIdCache.clear();
+  _dlUrlCache.clear();
+}
+async function getApprootId() {
+  if (_approotIdCache) return _approotIdCache;
+  const r = await graphFetch("GET", "/me/drive/special/approot?$select=id");
+  _approotIdCache = (await r.json()).id;
+  return _approotIdCache;
+}
+async function ensureSubfolder(name) {
+  if (!name) return getApprootId();
+  const cached = _subfolderIdCache.get(name);
+  if (cached !== void 0) return cached;
+  try {
+    const r = await graphFetch(
+      "GET",
+      `/me/drive/special/approot:/${encodeApprootPath(name)}?$select=id,name,folder`
+    );
+    const item = await r.json();
+    if (item.folder) {
+      _subfolderIdCache.set(name, item.id);
+      return item.id;
+    }
+    throw new Error(`${name} \u5DF2\u5B58\u5728\u4F46\u4E0D\u662F\u6587\u4EF6\u5939`);
+  } catch (e) {
+    if (e.status !== 404) throw e;
+  }
+  const segments = name.split("/").filter(Boolean);
+  let parentId = await getApprootId();
+  let cumulative = "";
+  for (const seg of segments) {
+    cumulative = cumulative ? `${cumulative}/${seg}` : seg;
+    const cachedSeg = _subfolderIdCache.get(cumulative);
+    if (cachedSeg !== void 0) {
+      parentId = cachedSeg;
+      continue;
+    }
+    try {
+      const r2 = await graphFetch(
+        "GET",
+        `/me/drive/special/approot:/${encodeApprootPath(cumulative)}?$select=id,folder`
+      );
+      const it2 = await r2.json();
+      if (it2.folder) {
+        parentId = it2.id;
+        _subfolderIdCache.set(cumulative, parentId);
+        continue;
+      }
+    } catch (e) {
+      if (e.status !== 404) throw e;
+    }
+    const r = await graphFetch("POST", `/me/drive/items/${parentId}/children`, {
+      body: {
+        name: seg,
+        folder: {},
+        "@microsoft.graph.conflictBehavior": "fail"
+      }
+    });
+    const it = await r.json();
+    parentId = it.id;
+    _subfolderIdCache.set(cumulative, parentId);
+  }
+  return parentId;
+}
+async function moveItemToFolder(itemId, targetFolderId, { eTag = null, newName = null, conflictBehavior = "fail" } = {}) {
+  const headers = {};
+  if (eTag) headers["If-Match"] = eTag;
+  const body = {
+    parentReference: { id: targetFolderId },
+    "@microsoft.graph.conflictBehavior": conflictBehavior
+  };
+  if (newName) body.name = newName;
+  const r = await graphFetch("PATCH", `/me/drive/items/${itemId}`, { headers, body });
+  return r.json();
+}
+async function renameItem(itemId, newName, eTag = null) {
+  const headers = {};
+  if (eTag) headers["If-Match"] = eTag;
+  const r = await graphFetch("PATCH", `/me/drive/items/${itemId}`, {
+    headers,
+    body: { name: newName }
+  });
+  return r.json();
+}
 
 // ../../20260813 internal-store/src/providers/auth.ts
 var CLIENT_ID = "";
@@ -3732,7 +3991,7 @@ async function signOut() {
   } catch (_) {
   }
 }
-async function getToken() {
+async function getToken2() {
   if (!pca || !activeAccount) throw new Error("Not signed in");
   try {
     const result = await pca.acquireTokenSilent({ scopes: SCOPES, account: activeAccount });
@@ -3771,244 +4030,6 @@ async function retrySilentSignIn() {
   } catch (_) {
     return false;
   }
-}
-
-// ../../20260813 internal-store/src/providers/graph.ts
-var GRAPH_BASE = "https://graph.microsoft.com/v1.0";
-var SIMPLE_UPLOAD_LIMIT = 4 * 1024 * 1024;
-function encodeSeg(name) {
-  return encodeURIComponent(name).replace(/'/g, "%27");
-}
-function encodeApprootPath(path) {
-  return path.split("/").filter(Boolean).map(encodeSeg).join("/");
-}
-async function graphFetch(method, pathOrUrl, { headers = {}, body = null } = {}) {
-  const token = await getToken();
-  const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${GRAPH_BASE}${pathOrUrl}`;
-  const init = { method, headers: { Authorization: `Bearer ${token}`, ...headers } };
-  if (body != null) {
-    if (typeof body === "string" || body instanceof ArrayBuffer || ArrayBuffer.isView(body) || body instanceof Blob) {
-      init.body = body;
-    } else {
-      init.body = JSON.stringify(body);
-      if (!init.headers["Content-Type"]) init.headers["Content-Type"] = "application/json";
-    }
-  }
-  const response = await fetch(url, init);
-  if (!response.ok) {
-    let detail = "";
-    try {
-      detail = await response.text();
-    } catch (_) {
-    }
-    const err = new Error(`Graph ${method} ${pathOrUrl} \u2192 ${response.status}: ${detail}`);
-    err.status = response.status;
-    err.body = detail;
-    throw err;
-  }
-  return response;
-}
-async function listChildren(subfolder = "") {
-  const pathPart = subfolder ? `:/${encodeApprootPath(subfolder)}:` : "";
-  const items = [];
-  let next = `/me/drive/special/approot${pathPart}/children?$top=200&$select=id,name,size,eTag,createdDateTime,lastModifiedDateTime,file,folder,@microsoft.graph.downloadUrl`;
-  while (next) {
-    let response;
-    try {
-      response = await graphFetch("GET", next);
-    } catch (e) {
-      if (e.status === 404 && subfolder) return [];
-      throw e;
-    }
-    const page = await response.json();
-    items.push(...page.value ?? []);
-    next = page["@odata.nextLink"] ?? null;
-  }
-  return items;
-}
-async function getItemByPath(path) {
-  try {
-    const r = await graphFetch(
-      "GET",
-      `/me/drive/special/approot:/${encodeApprootPath(path)}?$select=id,name,size,eTag,lastModifiedDateTime,folder,@microsoft.graph.downloadUrl`
-    );
-    return await r.json();
-  } catch (e) {
-    if (e.status === 404) return null;
-    throw e;
-  }
-}
-async function downloadItemBlob(itemId) {
-  const dl = await getDownloadUrl(itemId);
-  if (dl) {
-    const r2 = await fetch(dl);
-    if (!r2.ok) throw new Error(`downloadUrl failed ${r2.status}`);
-    return await r2.blob();
-  }
-  const r = await graphFetch("GET", `/me/drive/items/${itemId}/content`);
-  return await r.blob();
-}
-async function downloadItemRange(itemId, offset, length) {
-  const dl = await getDownloadUrl(itemId);
-  if (dl) return await downloadRangeFromUrl(dl, offset, length);
-  const r = await graphFetch("GET", `/me/drive/items/${itemId}/content`, { headers: { Range: _rangeHeader(offset, length) } });
-  return await r.arrayBuffer();
-}
-function _rangeHeader(offset, length) {
-  return offset == null ? `bytes=-${length}` : `bytes=${offset}-${offset + length - 1}`;
-}
-async function downloadRangeFromUrl(downloadUrl, offset, length) {
-  const r = await fetch(downloadUrl, { headers: { Range: _rangeHeader(offset, length) } });
-  if (!r.ok && r.status !== 206) {
-    const err = new Error(`range download failed ${r.status}`);
-    err.status = r.status;
-    throw err;
-  }
-  return await r.arrayBuffer();
-}
-async function getDownloadUrl(itemId) {
-  const r = await graphFetch("GET", `/me/drive/items/${itemId}`);
-  const j = await r.json();
-  return j["@microsoft.graph.downloadUrl"] || null;
-}
-async function uploadFileToApproot(path, blob, contentType = "application/octet-stream", { conflictBehavior = "replace", eTag = null } = {}) {
-  const headers = { "Content-Type": contentType };
-  if (eTag) headers["If-Match"] = eTag;
-  if (blob.size <= SIMPLE_UPLOAD_LIMIT) {
-    const r = await graphFetch(
-      "PUT",
-      `/me/drive/special/approot:/${encodeApprootPath(path)}:/content?@microsoft.graph.conflictBehavior=${conflictBehavior}`,
-      { headers, body: blob }
-    );
-    return r.json();
-  }
-  const sessR = await graphFetch(
-    "POST",
-    `/me/drive/special/approot:/${encodeApprootPath(path)}:/createUploadSession`,
-    {
-      body: {
-        item: {
-          "@microsoft.graph.conflictBehavior": conflictBehavior,
-          name: path.split("/").pop()
-        }
-      },
-      headers: eTag ? { "If-Match": eTag } : void 0
-    }
-  );
-  const { uploadUrl } = await sessR.json();
-  const CHUNK = 5 * 1024 * 1024;
-  let offset = 0;
-  let last = null;
-  while (offset < blob.size) {
-    const end = Math.min(offset + CHUNK, blob.size) - 1;
-    const chunk = blob.slice(offset, end + 1);
-    const r = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: {
-        "Content-Length": String(chunk.size),
-        "Content-Range": `bytes ${offset}-${end}/${blob.size}`
-      },
-      body: chunk
-    });
-    if (!r.ok && r.status !== 202) {
-      const err = new Error(`chunked upload failed ${r.status}`);
-      err.status = r.status;
-      throw err;
-    }
-    last = await r.json().then((j) => j).catch(() => null);
-    offset = end + 1;
-  }
-  return last;
-}
-async function deleteItem(itemId, eTag) {
-  await graphFetch("DELETE", `/me/drive/items/${itemId}`, eTag ? { headers: { "If-Match": eTag } } : {});
-}
-var _approotIdCache = null;
-var _subfolderIdCache = /* @__PURE__ */ new Map();
-function clearFolderCaches() {
-  _approotIdCache = null;
-  _subfolderIdCache.clear();
-}
-async function getApprootId() {
-  if (_approotIdCache) return _approotIdCache;
-  const r = await graphFetch("GET", "/me/drive/special/approot?$select=id");
-  _approotIdCache = (await r.json()).id;
-  return _approotIdCache;
-}
-async function ensureSubfolder(name) {
-  if (!name) return getApprootId();
-  const cached = _subfolderIdCache.get(name);
-  if (cached !== void 0) return cached;
-  try {
-    const r = await graphFetch(
-      "GET",
-      `/me/drive/special/approot:/${encodeApprootPath(name)}?$select=id,name,folder`
-    );
-    const item = await r.json();
-    if (item.folder) {
-      _subfolderIdCache.set(name, item.id);
-      return item.id;
-    }
-    throw new Error(`${name} \u5DF2\u5B58\u5728\u4F46\u4E0D\u662F\u6587\u4EF6\u5939`);
-  } catch (e) {
-    if (e.status !== 404) throw e;
-  }
-  const segments = name.split("/").filter(Boolean);
-  let parentId = await getApprootId();
-  let cumulative = "";
-  for (const seg of segments) {
-    cumulative = cumulative ? `${cumulative}/${seg}` : seg;
-    const cachedSeg = _subfolderIdCache.get(cumulative);
-    if (cachedSeg !== void 0) {
-      parentId = cachedSeg;
-      continue;
-    }
-    try {
-      const r2 = await graphFetch(
-        "GET",
-        `/me/drive/special/approot:/${encodeApprootPath(cumulative)}?$select=id,folder`
-      );
-      const it2 = await r2.json();
-      if (it2.folder) {
-        parentId = it2.id;
-        _subfolderIdCache.set(cumulative, parentId);
-        continue;
-      }
-    } catch (e) {
-      if (e.status !== 404) throw e;
-    }
-    const r = await graphFetch("POST", `/me/drive/items/${parentId}/children`, {
-      body: {
-        name: seg,
-        folder: {},
-        "@microsoft.graph.conflictBehavior": "fail"
-      }
-    });
-    const it = await r.json();
-    parentId = it.id;
-    _subfolderIdCache.set(cumulative, parentId);
-  }
-  return parentId;
-}
-async function moveItemToFolder(itemId, targetFolderId, { eTag = null, newName = null, conflictBehavior = "fail" } = {}) {
-  const headers = {};
-  if (eTag) headers["If-Match"] = eTag;
-  const body = {
-    parentReference: { id: targetFolderId },
-    "@microsoft.graph.conflictBehavior": conflictBehavior
-  };
-  if (newName) body.name = newName;
-  const r = await graphFetch("PATCH", `/me/drive/items/${itemId}`, { headers, body });
-  return r.json();
-}
-async function renameItem(itemId, newName, eTag = null) {
-  const headers = {};
-  if (eTag) headers["If-Match"] = eTag;
-  const r = await graphFetch("PATCH", `/me/drive/items/${itemId}`, {
-    headers,
-    body: { name: newName }
-  });
-  return r.json();
 }
 
 // ../../20260813 internal-store/src/folder-delete.ts
@@ -4072,10 +4093,11 @@ function graphToCloudProvider(graph) {
 // ../../20260813 internal-store/src/providers/index.ts
 function createOneDriveProvider(config = {}) {
   configureOneDriveAuth(config);
+  configureGraphTokenSource(getToken2);
   return {
     provider: graphToCloudProvider(graph_exports),
     // CloudProvider（喂 createCloudSync）
-    auth: { isAuthConfigured, initAuth, signIn, signOut, getToken, isSignedIn, getActiveAccount, retrySilentSignIn, onAuthChanged, getAuthState }
+    auth: { isAuthConfigured, initAuth, signIn, signOut, getToken: getToken2, isSignedIn, getActiveAccount, retrySilentSignIn, onAuthChanged, getAuthState }
   };
 }
 
@@ -4171,7 +4193,7 @@ function decideHeal(i) {
 }
 
 // src/main.ts
-var SPIKE_V = "spike-13 \xB7 2026-08-19";
+var SPIKE_V = "spike-14 \xB7 2026-08-20";
 var APP_ID = "br-spike";
 var DB_NAME = `${APP_ID}.defaultStore`;
 var AUDIO_EXT = /* @__PURE__ */ new Set(["mp3", "wav", "m4a", "flac", "ogg", "aac"]);
@@ -4346,10 +4368,8 @@ audio.addEventListener("timeupdate", () => {
 });
 function recoverPlayback(reason) {
   if (!current) return;
-  const t = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
-  log(`\u81EA\u6108\uFF1A\u91CD\u5EFA\u64AD\u653E\uFF08${reason}\uFF0C\u4F4D\u7F6E ${t.toFixed(1)}s\uFF09\uFF1A${current}`);
+  log(`\u81EA\u6108\uFF1A\u91CD\u5EFA\u64AD\u653E\uFF08${reason}\uFF0C\u4ECE\u5934\u64AD\uFF09\uFF1A${current}`);
   audio.src = streamUrl(current);
-  audio.currentTime = t;
   void audio.play().then(() => {
     log("\u81EA\u6108\uFF1A\u64AD\u653E\u5DF2\u7EED\u4E0A");
     nowEl.textContent = `\u25B6 ${current}`;
@@ -4399,7 +4419,6 @@ async function escalateRecovery(trigger) {
 }
 async function blobFallbackPlay() {
   if (!current) return;
-  const t = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
   log(`\u964D\u7EA7\uFF1A\u9875\u9762\u76F4\u4E0B\u6574\u66F2\u64AD blob\uFF1A${current}`);
   try {
     const h = await fileOf(current).openStream();
@@ -4417,8 +4436,7 @@ async function blobFallbackPlay() {
     if (blobUrl) URL.revokeObjectURL(blobUrl);
     blobUrl = URL.createObjectURL(new Blob([bytes], { type: MIME_BLOB[current.split(".").pop().toLowerCase()] ?? "application/octet-stream" }));
     audio.src = blobUrl;
-    audio.currentTime = t;
-    void audio.play().then(() => log(`\u964D\u7EA7\u6210\u529F\uFF1Ablob \u7EED\u64AD\uFF08${t.toFixed(1)}s \u8D77\uFF09`)).catch((e) => log(`\u964D\u7EA7 play() \u62D2\u7EDD\uFF1A${e.message}`));
+    void audio.play().then(() => log("\u964D\u7EA7\u6210\u529F\uFF1Ablob \u64AD\u653E\uFF08\u4ECE\u5934\u64AD\u2014\u20142026-08-20 \u590D\u64AD\u89C4\u5219\uFF09")).catch((e) => log(`\u964D\u7EA7 play() \u62D2\u7EDD\uFF1A${e.message}`));
   } catch (e) {
     log(`\u964D\u7EA7\u5F02\u5E38\uFF1A${e.message}`);
   }

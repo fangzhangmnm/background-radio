@@ -96,8 +96,111 @@
     return { partition: view };
   }
 
-  // ../../20260813 internal-store/src/sw/gateway.ts
+  // ../../20260813 internal-store/src/providers/graph.ts
+  var _tokenSource = null;
+  function configureGraphTokenSource(fn) {
+    _tokenSource = fn;
+  }
+  async function getToken() {
+    if (!_tokenSource) throw new Error("graph token source \u672A\u914D\u7F6E\uFF08\u9875\u9762\u8D70 createOneDriveProvider\uFF1BSW \u8D70 configureGraphTokenSource(createBridgeTokenSource(dbName))\uFF09");
+    return _tokenSource();
+  }
   var GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+  var SIMPLE_UPLOAD_LIMIT = 4 * 1024 * 1024;
+  function encodeSeg(name) {
+    return encodeURIComponent(name).replace(/'/g, "%27");
+  }
+  function encodeApprootPath(path) {
+    return path.split("/").filter(Boolean).map(encodeSeg).join("/");
+  }
+  async function graphFetch(method, pathOrUrl, { headers = {}, body = null } = {}) {
+    const token = await getToken();
+    const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${GRAPH_BASE}${pathOrUrl}`;
+    const init = { method, headers: { Authorization: `Bearer ${token}`, ...headers } };
+    if (body != null) {
+      if (typeof body === "string" || body instanceof ArrayBuffer || ArrayBuffer.isView(body) || body instanceof Blob) {
+        init.body = body;
+      } else {
+        init.body = JSON.stringify(body);
+        if (!init.headers["Content-Type"]) init.headers["Content-Type"] = "application/json";
+      }
+    }
+    const response = await fetch(url, init);
+    if (!response.ok) {
+      let detail = "";
+      try {
+        detail = await response.text();
+      } catch (_) {
+      }
+      const err = new Error(`Graph ${method} ${pathOrUrl} \u2192 ${response.status}: ${detail}`);
+      err.status = response.status;
+      err.body = detail;
+      throw err;
+    }
+    return response;
+  }
+  async function getItemByPath(path) {
+    try {
+      const r = await graphFetch(
+        "GET",
+        `/me/drive/special/approot:/${encodeApprootPath(path)}?$select=id,name,size,eTag,lastModifiedDateTime,folder,@microsoft.graph.downloadUrl`
+      );
+      return await r.json();
+    } catch (e) {
+      if (e.status === 404) return null;
+      throw e;
+    }
+  }
+  var _dlUrlCache = /* @__PURE__ */ new Map();
+  async function downloadItemRange(itemId, offset, length) {
+    let url = _dlUrlCache.get(itemId) ?? await getDownloadUrl(itemId);
+    if (url) {
+      _dlUrlCache.set(itemId, url);
+      try {
+        return await downloadRangeFromUrl(url, offset, length);
+      } catch (_e) {
+        _dlUrlCache.delete(itemId);
+        url = await getDownloadUrl(itemId);
+        if (url) {
+          _dlUrlCache.set(itemId, url);
+          return await downloadRangeFromUrl(url, offset, length);
+        }
+      }
+    }
+    const r = await graphFetch("GET", `/me/drive/items/${itemId}/content`, { headers: { Range: _rangeHeader(offset, length) } });
+    return await r.arrayBuffer();
+  }
+  function _rangeHeader(offset, length) {
+    return offset == null ? `bytes=-${length}` : `bytes=${offset}-${offset + length - 1}`;
+  }
+  async function downloadRangeFromUrl(downloadUrl, offset, length) {
+    const r = await fetch(downloadUrl, { headers: { Range: _rangeHeader(offset, length) } });
+    if (!r.ok && r.status !== 206) {
+      const err = new Error(`range download failed ${r.status}`);
+      err.status = r.status;
+      throw err;
+    }
+    return await r.arrayBuffer();
+  }
+  async function getDownloadUrl(itemId) {
+    const r = await graphFetch("GET", `/me/drive/items/${itemId}`);
+    const j = await r.json();
+    return j["@microsoft.graph.downloadUrl"] || null;
+  }
+
+  // ../../20260813 internal-store/src/sw/bridge.ts
+  function createBridgeTokenSource(dbName) {
+    const bridge = createPartitionedBlobStore(dbName).partition("sw-bridge");
+    return async () => {
+      const r = await bridge.get("token");
+      if (!r) throw new Error("\u51ED\u636E\u6865\u65E0 token\uFF08\u672A\u767B\u5F55\u6216\u9875\u9762\u6865\u672A\u542F\u52A8\uFF09");
+      const p = JSON.parse(await r.blob.text());
+      if (p?.v === 1 && typeof p.token === "string") return p.token;
+      throw new Error("\u51ED\u636E\u6865 token \u8BB0\u5F55\u4E0D\u53EF\u8BFB");
+    };
+  }
+
+  // ../../20260813 internal-store/src/sw/gateway.ts
   var CHUNK_DEFAULT = 2 * 1024 * 1024;
   function parseRange(h, size) {
     if (!h) return null;
@@ -118,44 +221,13 @@
     const bs = createPartitionedBlobStore(cfg.dbName);
     const staging = bs.partition("staging");
     const dirIdx = bs.partition("dir-index-cache");
-    const bridge = bs.partition("sw-bridge");
-    const urlCache = /* @__PURE__ */ new Map();
+    let cloud = cfg.cloud;
+    if (!cloud) {
+      configureGraphTokenSource(createBridgeTokenSource(cfg.dbName));
+      cloud = { getItemByPath, downloadItemRange };
+    }
     const resolveCache = /* @__PURE__ */ new Map();
-    async function getToken() {
-      try {
-        const r = await bridge.get("token");
-        if (!r) return null;
-        const p = JSON.parse(await r.blob.text());
-        return p?.v === 1 && typeof p.token === "string" ? p.token : null;
-      } catch {
-        return null;
-      }
-    }
-    const encodePath = (p) => p.split("/").filter(Boolean).map(encodeURIComponent).join("/");
-    async function graphJson(path) {
-      const token = await getToken();
-      if (!token) {
-        slog("graph \u8C03\u7528\uFF1A\u65E0 token");
-        return null;
-      }
-      let r;
-      try {
-        r = await fetch(`${GRAPH_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
-      } catch (e) {
-        slog(`graph \u7F51\u7EDC\u5F02\u5E38\uFF08fetch throw\uFF09\uFF1A${String(e?.message ?? e)}`);
-        return null;
-      }
-      if (!r.ok) {
-        let d = "";
-        try {
-          d = (await r.text()).slice(0, 180);
-        } catch {
-        }
-        slog(`graph ${r.status}\uFF1A${path.slice(0, 90)} \u2190 ${d}`);
-        return null;
-      }
-      return await r.json();
-    }
+    const etagVerified = /* @__PURE__ */ new Map();
     async function resolve(name) {
       const hit = resolveCache.get(name);
       if (hit) return hit;
@@ -175,28 +247,37 @@
         }
       } catch {
       }
-      const j = await graphJson(`/me/drive/special/approot:/${encodePath(name)}?$select=id,size,eTag,@microsoft.graph.downloadUrl`);
-      if (!j || typeof j.id !== "string") {
-        slog(`\u89E3\u6790 ${name} \u5931\u8D25\uFF08Graph \u515C\u5E95\u4E5F\u6CA1\u62FF\u5230\uFF1Btoken=${await getToken() ? "\u6709" : "\u65E0"}\uFF09`);
+      let j = null;
+      try {
+        j = await cloud.getItemByPath(name);
+      } catch (e) {
+        slog(`Graph \u89E3\u6790\u5F02\u5E38\uFF1A${String(e?.message ?? e).slice(0, 160)}`);
+        return null;
+      }
+      if (!j?.id) {
+        slog(`\u89E3\u6790 ${name} \u5931\u8D25\uFF08Graph \u515C\u5E95\u4E5F\u6CA1\u62FF\u5230\uFF09`);
         return null;
       }
       slog(`\u89E3\u6790 ${name} \u2190 Graph\uFF08size=${j.size}\uFF09`);
       const r = { id: j.id, size: j.size ?? 0, eTag: j.eTag ?? "" };
-      if (typeof j["@microsoft.graph.downloadUrl"] === "string") urlCache.set(name, j["@microsoft.graph.downloadUrl"]);
       resolveCache.set(name, r);
       return r;
     }
-    async function freshUrl(name, id) {
-      let j = await graphJson(`/me/drive/items/${id}`);
-      if (typeof j?.["@microsoft.graph.downloadUrl"] !== "string") {
-        if (j) slog(`items/{id} \u54CD\u5E94\u65E0 downloadUrl\uFF08\u952E\uFF1A${Object.keys(j).slice(0, 12).join(",")}\uFF09\u2192 \u6309\u8DEF\u5F84\u515C\u5E95`);
-        j = await graphJson(`/me/drive/special/approot:/${encodePath(name)}`);
-        if (j && typeof j["@microsoft.graph.downloadUrl"] !== "string") slog(`\u8DEF\u5F84\u515C\u5E95\u4E5F\u65E0 downloadUrl\uFF08\u952E\uFF1A${Object.keys(j).slice(0, 12).join(",")}\uFF09`);
+    async function ensureStagingFresh(name, item) {
+      if (etagVerified.get(name) === item.eTag) return;
+      try {
+        const mrec = await staging.get(`meta:${name}`);
+        if (mrec) {
+          const m = JSON.parse(await mrec.blob.text());
+          if (m?.eTag && m.eTag !== item.eTag) {
+            const prefix = `chunk:${name}:`;
+            for (const k of await staging.keys()) if (k === `meta:${name}` || k.startsWith(prefix)) await staging.del(k);
+            slog(`\u9648\u5206\u7247\u5B88\u536B\uFF1A${name} staging \u662F\u65E7\u7248\uFF08${m.eTag.slice(0, 8)}\u2026\u2260${item.eTag.slice(0, 8)}\u2026\uFF09\u2192 \u6574\u7EC4\u5DF2\u6E05`);
+          }
+        }
+      } catch {
       }
-      const u = j?.["@microsoft.graph.downloadUrl"];
-      if (typeof u !== "string") return null;
-      urlCache.set(name, u);
-      return u;
+      etagVerified.set(name, item.eTag);
     }
     const inflight = /* @__PURE__ */ new Map();
     function getChunk(name, item, i) {
@@ -204,6 +285,7 @@
       const existing = inflight.get(key);
       if (existing) return existing;
       const job = (async () => {
+        await ensureStagingFresh(name, item);
         try {
           const c = await staging.get(`chunk:${name}:${i}`);
           if (c) {
@@ -214,27 +296,8 @@
         }
         const off = i * chunkBytes;
         const len = Math.min(chunkBytes, item.size - off);
-        const doFetch = async (url2) => fetch(url2, { headers: { Range: `bytes=${off}-${off + len - 1}` } });
-        let url = urlCache.get(name) ?? await freshUrl(name, item.id);
-        if (!url) throw new Error(`\u65E0\u51ED\u636E/\u53D6\u4E0D\u5230 downloadUrl\uFF08token=${await getToken() ? "\u6709" : "\u65E0"}\uFF09\uFF1A${name}`);
-        let resp = null;
-        try {
-          resp = await doFetch(url);
-        } catch (e) {
-          slog(`range fetch \u5F02\u5E38\uFF08${String(e?.message ?? e)}\uFF09\u2192 \u6362\u65B0 URL \u91CD\u8BD5`);
-        }
-        if (!resp || resp.status === 401 || resp.status === 403 || resp.status === 404) {
-          url = await freshUrl(name, item.id);
-          if (!url) throw new Error(`downloadUrl \u7EED\u671F\u5931\u8D25\uFF1A${name}`);
-          try {
-            resp = await doFetch(url);
-          } catch (e) {
-            throw new Error(`range \u62C9\u53D6\u7F51\u7EDC\u5F02\u5E38\uFF08\u6362\u65B0 URL \u91CD\u8BD5\u540E\u4ECD\u8D25\uFF09\uFF1A${String(e?.message ?? e)}\uFF1A${name}`);
-          }
-        }
-        if (!resp.ok && resp.status !== 206) throw new Error(`range \u62C9\u53D6\u5931\u8D25 ${resp.status}\uFF1A${name}`);
-        const bytes = new Uint8Array(await resp.arrayBuffer());
-        slog(`\u5206\u7247 ${i} \u2190 \u4E91\u7AEF\uFF08${bytes.length}B\uFF0CHTTP ${resp.status}\uFF09`);
+        const bytes = new Uint8Array(await cloud.downloadItemRange(item.id, off, len));
+        slog(`\u5206\u7247 ${i} \u2190 \u4E91\u7AEF\uFF08${bytes.length}B\uFF09`);
         try {
           await staging.put(`chunk:${name}:${i}`, { blob: new Blob([bytes]), updatedAt: Date.now() });
           const mrec = await staging.get(`meta:${name}`);
