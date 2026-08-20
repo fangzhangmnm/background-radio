@@ -2,7 +2,9 @@
    单屏 shell：顶栏 / 滚动列表 / seek 行 / Win8 tile 控制格 / 右滑抽屉菜单；iPhone SE2 基准 + safe-area）。
    token 表与布局尺寸原样搬自 v1 style.css；主题跟随系统（v1 的 day/night 手动切换待议——现无本地持久化通道）。 */
 
-:root {
+/* 主题三选（v1/WebPaint 同款）：data-theme=auto|day|night。模板 html 标签烤死 data-theme="auto"，
+   手动选的主题由 boot 从 device-state 读出后覆盖（IDB 异步 → 手动党首帧可能闪一下系统色，接受）。 */
+:root, :root[data-theme="day"], :root[data-theme="auto"] {
   --font: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
 
@@ -20,8 +22,8 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    /* NIGHT · 黑金 */
+  :root[data-theme="auto"] {
+    /* NIGHT · 黑金（跟随系统） */
     --bg-canvas: #121110;
     --bg-surface: #1C1B18;
     --hairline: #33302A;
@@ -33,6 +35,20 @@
     --hover: #252220;
     --active: #2E2A24;
   }
+}
+
+:root[data-theme="night"] {
+  /* NIGHT · 黑金（手动） */
+  --bg-canvas: #121110;
+  --bg-surface: #1C1B18;
+  --hairline: #33302A;
+  --fg: #EDE7D6;
+  --fg-soft: #9A9176;
+  --accent: #C8A24C;
+  --accent-deep: #C8A24C;
+  --on-accent: #121110;
+  --hover: #252220;
+  --active: #2E2A24;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }

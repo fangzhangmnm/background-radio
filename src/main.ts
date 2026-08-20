@@ -488,12 +488,28 @@ $("forwardBtn").onclick = () => {
   const t = audio.currentTime + FORWARD_SECS;
   audio.currentTime = Number.isFinite(audio.duration) ? Math.min(audio.duration, t) : t;
 };
-// 音量（iOS audio.volume 只读 → 整条藏掉，v1 同款检测；音量暂不持久化——落 device-state 需走持久化同意流程）
+// 音量（iOS audio.volume 只读 → 整条藏掉，v1 同款检测）；记忆进 device-state（local-only，2026-08-20 user 同意）
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 if (IS_IOS) document.body.classList.add("no-volume");
 const volumeBar = $("volumeBar") as unknown as HTMLInputElement;
 audio.volume = 0.8;
 volumeBar.oninput = () => { audio.volume = Number(volumeBar.value) / 100; };
+volumeBar.onchange = () => { try { deviceState.setItem("volume", audio.volume); void deviceState.flushLocal(); } catch { /* init 前忽略 */ } };   // flush：设置类写完立即落盘（IDB 防抖 400ms，防「改完秒关」丢档）
+// 主题三选（v1/WebPaint 同款 auto/day/night）；记忆进 device-state（local-only，2026-08-20 user 同意）
+type Theme = "auto" | "day" | "night";
+function applyTheme(t: Theme): void {
+  document.documentElement.setAttribute("data-theme", t);
+  const r = document.querySelector<HTMLInputElement>(`input[name="theme"][value="${t}"]`);
+  if (r) r.checked = true;
+}
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name="theme"]')) {
+  r.onchange = () => {
+    const t: Theme = r.value === "day" || r.value === "night" ? (r.value as Theme) : "auto";
+    applyTheme(t);
+    try { deviceState.setItem("theme", t); void deviceState.flushLocal(); } catch { /* init 前忽略 */ }
+    log(`主题 → ${t}`);
+  };
+}
 // 循环模式（抽屉 radio，v1 语言）
 for (const r of document.querySelectorAll<HTMLInputElement>('input[name="loop"]')) {
   r.onchange = () => {
@@ -597,6 +613,14 @@ function proceedSignedIn(): void {
   renderControls();
   await ensureSw();
   await deviceState.init();
+  // 主题/音量记忆（local-only；手动主题党首帧可能闪一下系统色——无 localStorage 通道，接受）
+  const savedTheme = deviceState.getItem<Theme>("theme");
+  if (savedTheme === "day" || savedTheme === "night") applyTheme(savedTheme);
+  const savedVol = deviceState.getItem<number>("volume");
+  if (typeof savedVol === "number" && savedVol >= 0 && savedVol <= 1) {
+    audio.volume = savedVol;
+    volumeBar.value = String(Math.round(savedVol * 100));
+  }
   // 恢复上次（唯一中间复播点）：先恢复夹/模式，播放等用户点绿色继续键（iOS 也要手势才让响）。
   const saved = deviceState.getItem<PlaybackState>("playback");
   if (saved) {

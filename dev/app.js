@@ -4474,7 +4474,7 @@ var CHUNK_DEFAULT2 = 2 * 1024 * 1024;
 var CLIENT_ID2 = "aa43a186-25cd-4140-ade9-c0abd6ce5cb6";
 var AUTHORITY2 = "https://login.microsoftonline.com/common";
 var SCOPES2 = ["Files.ReadWrite.AppFolder", "offline_access"];
-var APP_VERSION = "0.2.2";
+var APP_VERSION = "0.2.3";
 
 // src/player-logic.ts
 async function resolveAvail(f) {
@@ -5224,6 +5224,30 @@ audio.volume = 0.8;
 volumeBar.oninput = () => {
   audio.volume = Number(volumeBar.value) / 100;
 };
+volumeBar.onchange = () => {
+  try {
+    deviceState.setItem("volume", audio.volume);
+    void deviceState.flushLocal();
+  } catch {
+  }
+};
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  const r = document.querySelector(`input[name="theme"][value="${t}"]`);
+  if (r) r.checked = true;
+}
+for (const r of document.querySelectorAll('input[name="theme"]')) {
+  r.onchange = () => {
+    const t = r.value === "day" || r.value === "night" ? r.value : "auto";
+    applyTheme(t);
+    try {
+      deviceState.setItem("theme", t);
+      void deviceState.flushLocal();
+    } catch {
+    }
+    log(`\u4E3B\u9898 \u2192 ${t}`);
+  };
+}
 for (const r of document.querySelectorAll('input[name="loop"]')) {
   r.onchange = () => {
     mode = r.value === "single" ? "single" : "folder";
@@ -5338,6 +5362,13 @@ function proceedSignedIn() {
   renderControls();
   await ensureSw();
   await deviceState.init();
+  const savedTheme = deviceState.getItem("theme");
+  if (savedTheme === "day" || savedTheme === "night") applyTheme(savedTheme);
+  const savedVol = deviceState.getItem("volume");
+  if (typeof savedVol === "number" && savedVol >= 0 && savedVol <= 1) {
+    audio.volume = savedVol;
+    volumeBar.value = String(Math.round(savedVol * 100));
+  }
   const saved = deviceState.getItem("playback");
   if (saved) {
     currentFolder = saved.folder ?? "";
