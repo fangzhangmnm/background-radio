@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101418">
+<title>背景电台</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<!--ICONS_SPRITE-->
+<header>
+  <h1>背景电台 <span id="ver"></span></h1>
+  <button id="cloudBtn" class="iconbtn" aria-label="云端菜单"><svg class="ic"><use href="#cloud-pending"/></svg></button>
+</header>
+<div id="cloudMenu" hidden>
+  <div id="cloudWho" class="menu-note">未登录</div>
+  <button id="authBtn"><svg class="ic"><use href="#sign-out"/></svg><span id="authLabel">登录</span></button>
+  <button id="refreshBtn"><svg class="ic"><use href="#refresh"/></svg>刷新列表</button>
+</div>
+<main>
+  <section id="nowPlaying">
+    <div id="nowTitle">未在播放</div>
+    <div id="controls">
+      <button id="bigPlay" class="bigbtn" aria-label="播放/暂停"><svg class="ic-big"><use id="bigPlayIcon" href="#play"/></svg></button>
+      <button id="nextBtn" class="ctlbtn" aria-label="下一曲"><svg class="ic"><use href="#skip-next"/></svg><span>下一曲</span></button>
+      <button id="modeBtn" class="ctlbtn" aria-label="播放模式"><svg class="ic"><use href="#repeat-one"/></svg><span id="modeLabel">顺序循环</span></button>
+    </div>
+    <button id="resumeBtn" hidden></button>
+  </section>
+  <div id="status"></div>
+  <section id="list"></section>
+</main>
+<details id="debug"><summary>调试日志</summary><div id="log"></div></details>
+<audio id="audio" playsinline></audio>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

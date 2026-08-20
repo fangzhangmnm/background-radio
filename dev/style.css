@@ -1,0 +1,39 @@
+/* BR v2 —— 开车/干活用：一切为「一下点中」服务。深色、超大点击目标、中文 sans。 */
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: #101418; color: #e8ecf0; font-family: sans-serif; }
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+button { font: inherit; color: inherit; background: #1c232b; border: 1px solid #2c3742; border-radius: 10px; cursor: pointer; }
+button:active { background: #2a3542; }
+.ic { width: 22px; height: 22px; vertical-align: -5px; }   /* fill/stroke 由 sprite symbol 自足（currentColor），别在这覆盖——media 批是实心图标 */
+.ic-big { width: 56px; height: 56px; }
+
+header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 4px; }
+header h1 { font-size: 20px; margin: 0; }
+#ver { font-size: 12px; color: #7b8794; font-weight: normal; }
+.iconbtn { width: 48px; height: 48px; display: grid; place-items: center; }
+
+#cloudMenu { position: absolute; right: 12px; top: 62px; z-index: 10; background: #1c232b; border: 1px solid #2c3742;
+  border-radius: 12px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-width: 220px; box-shadow: 0 6px 24px #0008; }
+#cloudMenu button { display: flex; align-items: center; gap: 8px; padding: 12px; text-align: left; }
+.menu-note { font-size: 12px; color: #7b8794; padding: 2px 6px; word-break: break-all; }
+
+#nowPlaying { padding: 10px 14px; }
+#nowTitle { font-size: 16px; min-height: 22px; margin-bottom: 8px; word-break: break-all; }
+#controls { display: flex; align-items: center; gap: 12px; }
+.bigbtn { width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; background: #2563eb; border-color: #2563eb; flex-shrink: 0; }
+.bigbtn:active { background: #1d4ed8; }
+.ctlbtn { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 12px; min-width: 84px; font-size: 13px; }
+#resumeBtn { display: block; width: 100%; margin-top: 10px; padding: 14px; font-size: 15px; background: #123322; border-color: #1d5c3a; }
+
+#status { padding: 4px 14px; min-height: 20px; font-size: 13px; color: #f0b34e; word-break: break-all; }
+
+#list { padding: 4px 8px 20px; }
+.row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-bottom: 1px solid #1c232b; min-height: 56px; }
+.row .label { flex: 1; padding: 12px 4px; font-size: 15px; word-break: break-all; cursor: pointer; }
+.row.playing .label { color: #6ea8ff; }
+.row.folder .label { color: #d3dae2; }
+.row .badge { font-size: 11px; color: #7b8794; white-space: nowrap; }
+.row .pinbtn { padding: 10px 12px; font-size: 13px; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+#debug { padding: 8px 14px 30px; color: #7b8794; font-size: 12px; }
+#debug #log { font-family: ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; max-height: 45vh; overflow-y: auto; }

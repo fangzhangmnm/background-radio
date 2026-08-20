@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101418">
+<title>背景电台</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none">
+<!--
+  18 icons extracted from the family icon library (../20260708 SVG Icons/icons.svg) by extract-icons.py — do not hand-edit; re-run the script instead.
+  Family SVG Icons — MIT License, Copyright (c) 2026 fangzhangmnm.
+  Contains work derived from (per-icon provenance in data-src):
+    Feather Icons — MIT License, Copyright (c) 2013-2023 Cole Bemis · https://github.com/feathericons/feather
+    Lucide — ISC License, Copyright (c) 2020 Lucide Contributors · https://github.com/lucide-icons/lucide
+-->
+  <!-- media -->
+  <!-- play — 播放:实心右向三角 ▶(IEC 60417 磁带机惯例统一实心, 描边同色叠加得圆角); 20260819 media 批入库 -->
+  <symbol id="play" data-cat="media" data-src="own" data-note="播放:实心右向三角 ▶(IEC 60417 磁带机惯例统一实心, 描边同色叠加得圆角); 20260819 media 批入库" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8.2 5.4 L18.8 12 L8.2 18.6 Z" fill="currentColor"/></symbol>
+  <!-- pause — 暂停:双竖杠 ⏸(粗 3.2 圆帽, brush-width 同款加粗手法); 20260819 media 批入库 -->
+  <symbol id="pause" data-cat="media" data-src="own" data-note="暂停:双竖杠 ⏸(粗 3.2 圆帽, brush-width 同款加粗手法); 20260819 media 批入库" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g stroke-width="3.2"><path d="M8.3 5.5 V18.5"/><path d="M15.7 5.5 V18.5"/></g></symbol>
+  <!-- file -->
+  <!-- folder — 文件夹:左边 tab + 矩形主体 -->
+  <symbol id="folder" data-cat="file" data-src="lucide:folder" data-note="文件夹:左边 tab + 矩形主体" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 文件夹：左边 tab + 矩形主体 --> <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <!-- common -->
+  <!-- back — 返回:左向整箭头(带杆;裸 chevron-left 曾因小尺寸渲染差被 sunset) -->
+  <symbol id="back" data-cat="common" data-src="own" data-note="返回:左向整箭头(带杆;裸 chevron-left 曾因小尺寸渲染差被 sunset)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H5"/><polyline points="11 6 5 12 11 18"/></symbol>
+  <!-- x — 叉 -->
+  <symbol id="x" data-cat="common" data-src="own" data-note="叉" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5"/></symbol>
+  <!-- check — 勾 -->
+  <symbol id="check" data-cat="common" data-src="own" data-note="勾" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5 L9.5 17.5 L19.5 6.5"/></symbol>
+  <!-- cloud -->
+  <!-- cloud — 云 -->
+  <symbol id="cloud" data-cat="cloud" data-src="feather:cloud" data-note="云" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></symbol>
+  <!-- cloud-synced — 云+勾 -->
+  <symbol id="cloud-synced" data-cat="cloud" data-src="feather:cloud" data-note="云+勾" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></symbol>
+  <symbol id="cloud-unavailable" data-cat="cloud" data-src="feather:cloud" data-note="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><line x1="3" y1="3" x2="21" y2="21"/></symbol>
+  <!-- cloud-pending — 待判定:虚线云 + 云内问号(加粗 2.4, 遮罩描边留白与云脱开;问号下点的半径=描边半宽) -->
+  <symbol id="cloud-pending" data-cat="cloud" data-src="own" data-note="待判定:虚线云 + 云内问号(加粗 2.4, 遮罩描边留白与云脱开;问号下点的半径=描边半宽)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icQC"><rect width="24" height="24" fill="#fff" stroke="none"/><g transform="translate(-6.00 -8.10) scale(1.500)" stroke="#000" fill="#000" stroke-width="3.33" stroke-linecap="round"><path d="M10.2 12.1a1.9 1.9 0 1 1 2.6 1.75c-.55.25-.8.7-.8 1.35v.4" fill="none"/><circle cx="12" cy="17.5" r="1.67" stroke="none"/></g></mask><g mask="url(#icQC)"><g transform="translate(0 0) scale(1.0)" stroke-width="1.70"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" stroke-dasharray="2.50 2.50"/></g></g><g transform="translate(-6.00 -8.10) scale(1.500)" stroke-width="1.60"><path d="M10.2 12.1a1.9 1.9 0 1 1 2.6 1.75c-.55.25-.8.7-.8 1.35v.4"/><circle cx="12" cy="17.5" r="0.80" fill="currentColor" stroke="none"/></g></symbol>
+  <!-- cloud-busy-base — 云端忙 静态件:云轮廓中心挖圆洞, 与 cloud-busy-spinner 叠放合成一个资产 -->
+  <symbol id="cloud-busy-base" data-cat="cloud" data-src="own" data-note="云端忙 静态件:云轮廓中心挖圆洞, 与 cloud-busy-spinner 叠放合成一个资产" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icCBB"><rect width="24" height="24" fill="#fff" stroke="none"/><circle cx="12" cy="12" r="4.9" fill="#000" stroke="none"/></mask><g mask="url(#icCBB)"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></g></symbol>
+  <!-- cloud-busy-spinner — 云端忙 旋转件:弧+箭头, 圆心正在 (12,12) 所以 CSS rotate 原地转不甩 -->
+  <symbol id="cloud-busy-spinner" data-cat="cloud" data-src="own" data-note="云端忙 旋转件:弧+箭头, 圆心正在 (12,12) 所以 CSS rotate 原地转不甩" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.00 8.70 A3.3 3.3 0 1 1 8.90 13.13"/><path d="M10.66 14.61 L8.90 13.13 L8.50 15.39"/></symbol>
+  <!-- refresh — 刷新:顺时针 3/4 圆 + 箭头(从 12 点绕到 9 点, 箭头尖在右上) -->
+  <symbol id="refresh" data-cat="cloud" data-src="own" data-note="刷新:顺时针 3/4 圆 + 箭头(从 12 点绕到 9 点, 箭头尖在右上)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 顺时针 3/4 圆 + 箭头：从 12 点出发顺时针绕到 9 点；箭头尖在右上 --> <path d="M21 12a9 9 0 1 1-3.5-7.1"/> <polyline points="21 4 21 9 16 9"/></symbol>
+  <!-- sign-out — 退出登录:门框+向外箭头(通用 logout 图元) -->
+  <symbol id="sign-out" data-cat="cloud" data-src="own" data-note="退出登录:门框+向外箭头(通用 logout 图元)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 4.5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h7.5"/><path d="M17 8.5 L20.5 12 L17 15.5"/><path d="M20.5 12H10"/></symbol>
+  <!-- download — 下载 -->
+  <symbol id="download" data-cat="cloud" data-src="feather:download" data-note="下载" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+  <!-- ui -->
+  <!-- menu — 汉堡菜单:三条等长横线(y=7/12/17) -->
+  <symbol id="menu" data-cat="ui" data-src="own" data-note="汉堡菜单:三条等长横线(y=7/12/17)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"></line> <line x1="4" y1="12" x2="20" y2="12"></line> <line x1="4" y1="17" x2="20" y2="17"></line></symbol>
+  <!-- missing -->
+  <!-- skip-next — 缺图标占位 — skip-next 尚未进 icons.svg -->
+  <symbol data-missing="1" id="skip-next" data-cat="missing" data-src="own" data-note="缺图标占位 — skip-next 尚未进 icons.svg，重跑 extract-icons.py 可自动换成真图标" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2.5" stroke-dasharray="2.5 2.5" opacity="0.35"/></symbol>
+  <!-- repeat-one — 缺图标占位 — repeat-one 尚未进 icons.svg -->
+  <symbol data-missing="1" id="repeat-one" data-cat="missing" data-src="own" data-note="缺图标占位 — repeat-one 尚未进 icons.svg，重跑 extract-icons.py 可自动换成真图标" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2.5" stroke-dasharray="2.5 2.5" opacity="0.35"/></symbol>
+</svg>
+
+<header>
+  <h1>背景电台 <span id="ver"></span></h1>
+  <button id="cloudBtn" class="iconbtn" aria-label="云端菜单"><svg class="ic"><use href="#cloud-pending"/></svg></button>
+</header>
+<div id="cloudMenu" hidden>
+  <div id="cloudWho" class="menu-note">未登录</div>
+  <button id="authBtn"><svg class="ic"><use href="#sign-out"/></svg><span id="authLabel">登录</span></button>
+  <button id="refreshBtn"><svg class="ic"><use href="#refresh"/></svg>刷新列表</button>
+</div>
+<main>
+  <section id="nowPlaying">
+    <div id="nowTitle">未在播放</div>
+    <div id="controls">
+      <button id="bigPlay" class="bigbtn" aria-label="播放/暂停"><svg class="ic-big"><use id="bigPlayIcon" href="#play"/></svg></button>
+      <button id="nextBtn" class="ctlbtn" aria-label="下一曲"><svg class="ic"><use href="#skip-next"/></svg><span>下一曲</span></button>
+      <button id="modeBtn" class="ctlbtn" aria-label="播放模式"><svg class="ic"><use href="#repeat-one"/></svg><span id="modeLabel">顺序循环</span></button>
+    </div>
+    <button id="resumeBtn" hidden></button>
+  </section>
+  <div id="status"></div>
+  <section id="list"></section>
+</main>
+<details id="debug"><summary>调试日志</summary><div id="log"></div></details>
+<audio id="audio" playsinline></audio>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "background-radio",
+  "private": true,
+  "version": "0.1.0",
+  "comment": "BR v2 全量重写（2026-08-20 开工，plan=~/.claude/plans/vast-frolicking-shamir.md）。依赖全 vendor：@internal/store 走 file:vendor-pkgs/*.tgz（断网可装）；esbuild 打进 dev/ bundle，部署零 node_modules。devDependencies 只供 tsc 类型门。旧 app（根目录 raw JS）= 现役 prod，cutover 前不碰。",
+  "type": "module",
+  "dependencies": {
+    "@internal/store": "file:./vendor-pkgs/internal-store-0.2.0.tgz"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}
