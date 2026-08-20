@@ -10,7 +10,8 @@ node test/player-logic.test.mjs
 "$ESBUILD" src/sw.ts   --bundle --format=iife --target=safari16 --outfile=dev/sw.js
 python3 - << 'PY'
 tpl = open("src/index.template.html").read()
-sprite = open("assets/icons-sprite.svg").read()
+# 共享 sprite 在前、本地补丁 sprite 在后：同 id 先到先得 → 真图入库重跑 extract 后 stopgap 自动让位
+sprite = open("assets/icons-sprite.svg").read() + "\n" + open("assets/icons-local.svg").read()
 assert "<!--ICONS_SPRITE-->" in tpl
 open("dev/index.html", "w").write(tpl.replace("<!--ICONS_SPRITE-->", sprite))
 PY

@@ -1,11 +1,14 @@
 {
-  "name": "背景电台 v2（dev）",
-  "short_name": "电台v2",
+  "name": "Background Radio",
+  "short_name": "Radio",
+  "description": "把 OneDrive 上的音频当电台放。Resume-on-open。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#101418",
-  "theme_color": "#101418",
+  "orientation": "any",
+  "background_color": "#1a1916",
+  "theme_color": "#221f1a",
+  "lang": "zh-CN",
   "icons": [
     { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png" }

@@ -33,17 +33,18 @@ await page.waitForTimeout(5000);
 
 // #log 在折叠的 <details> 里，innerText 对不可见元素返回空串 → 用 textContent
 const logText = await page.locator("#log").evaluate((el) => el.textContent ?? "").catch(() => "");
-await page.click("#cloudBtn");
-const menuVisible = await page.locator("#cloudMenu").isVisible();
+await page.click("#menuToggle");
+const menuOpen = await page.locator("#menuDrawer").evaluate((el) => el.classList.contains("open"));
 const checks = [
   [logText.includes("启动"), "boot 行出现"],
   [/SW 已接管|SW 接管完成/.test(logText), "SW 接管"],
   [logText.includes("未登录"), "未登录路径走通（headless 无账号）"],
   [(await page.locator("#bigPlay").count()) === 1, "大播放键在"],
-  [(await page.locator("#modeBtn").count()) === 1, "模式钮在"],
-  [menuVisible, "云菜单点开"],
+  [(await page.locator("#prevBtn").count()) === 1 && (await page.locator("#rewindBtn").count()) === 1, "tile 控制格在（prev/rewind）"],
+  [(await page.locator('input[name="loop"]').count()) === 2, "循环模式 radio 在"],
+  [menuOpen, "抽屉菜单点开"],
   [(await page.locator("#authLabel").innerText()) === "登录", "未登录时菜单显「登录」"],
-  [(await page.locator("svg.ic use").count()) > 0, "图标 sprite 接上"],
+  [(await page.locator("svg use").count()) > 0, "图标 sprite 接上"],
 ];
 // MSAL 静默探测在无账号 headless 下的网络/授权报错属预期；其余 console/page 错误都算失败。
 const realErrors = errors.filter((e) => !/msal|login\.microsoftonline|favicon|AADSTS|interaction_required|no_account/i.test(e));

@@ -4,7 +4,8 @@
 // 骨架：@internal/store v0.2.0 正式收货（tgz file: 依赖，不再 spike 特权 src 打包）。
 //   字节路径 = SW range 代理（store ./sw 网关）；边界/护栏/自愈决策 = player-logic 纯函数（48 断言 mock 测）。
 // 复播规则（2026-08-20 user 拍板）：点曲/接曲/循环/自愈一律从 0；唯一中间复播 = 新开 app 恢复上次。
-// UI（2026-08-20 user）：云按钮（登录/登出/刷新菜单）进主界面 header，图标走家族共享库；超大播放键；纯中文。
+// UI（2026-08-20 user）：v1 排版整套回归（shell/顶栏/滚动列表/seek 行/Win8 tile 控制格/右滑抽屉菜单，
+//   iPhone SE2 基准）；命名对齐旧版（Background Radio / Radio），版本号不上脸；图标走家族共享库；纯中文。
 import { createStore, createOneDriveProvider, type FolderSnapshot } from "@internal/store";
 import { startSwAuthBridge } from "@internal/store/sw";
 import { CLIENT_ID, AUTHORITY, SCOPES, APP_VERSION } from "./config.ts";
@@ -83,6 +84,10 @@ async function ensureSw(): Promise<void> {
 // ── 播放器状态 ───────────────────────────────────────────────────────────
 const audio = $("audio") as unknown as HTMLAudioElement;
 const nowTitle = $("nowTitle");
+const statusScope = $("statusScope");
+function renderScope(): void {
+  statusScope.textContent = (auth.isSignedIn() ? "" : "未登录 · ") + "/" + currentFolder;
+}
 let mode: "folder" | "single" = "folder";
 let currentFolder = "";
 let tracks: string[] = [];            // 当前夹音频文件（列表序）
@@ -274,16 +279,18 @@ setInterval(() => {   // 看门狗（spike 二轮战例：亮屏回 wifi 时 onl
   } else stallStrikes = 0;
 }, 8000);
 
-// ── 进度条 + 时间（点条 seek——SW range 代理天然支持跳播）─────────────────────
+// ── seek 行：时间 + 点条 seek（SW range 代理天然支持跳播）────────────────────
 const progressWrap = $("progressWrap");
 const progressBar = $("progressBar");
-const timeLabel = $("timeLabel");
+const posCur = $("posCur");
+const posDur = $("posDur");
 const fmtTime = (s: number): string => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 function renderProgress(): void {
   const dur = audio.duration;
-  if (!current || !Number.isFinite(dur) || dur <= 0) { progressBar.style.width = "0"; timeLabel.textContent = ""; return; }
+  if (!current || !Number.isFinite(dur) || dur <= 0) { progressBar.style.width = "0"; posCur.textContent = "0:00"; posDur.textContent = "0:00"; return; }
   progressBar.style.width = `${(audio.currentTime / dur) * 100}%`;
-  timeLabel.textContent = `${fmtTime(audio.currentTime)} / ${fmtTime(dur)}`;
+  posCur.textContent = fmtTime(audio.currentTime);
+  posDur.textContent = fmtTime(dur);
   if ("mediaSession" in navigator) {   // 锁屏进度条（best-effort，老 Safari 没有 setPositionState）
     try { navigator.mediaSession.setPositionState?.({ duration: dur, playbackRate: audio.playbackRate, position: Math.min(audio.currentTime, dur) }); } catch { /* 无妨 */ }
   }
@@ -303,10 +310,16 @@ progressWrap.onclick = (e) => {
 function setMediaSession(name: string): void {
   if (!("mediaSession" in navigator)) return;
   try {
-    navigator.mediaSession.metadata = new MediaMetadata({ title: shortName(name), artist: "背景电台" });
+    navigator.mediaSession.metadata = new MediaMetadata({ title: shortName(name), artist: "Background Radio" });
     navigator.mediaSession.setActionHandler("play", () => void audio.play());
     navigator.mediaSession.setActionHandler("pause", () => audio.pause());
     navigator.mediaSession.setActionHandler("nexttrack", () => { const n = current && nextOf(tracks, current); if (n) void play(n); });
+    navigator.mediaSession.setActionHandler("previoustrack", () => { const p = prevOf(tracks, current); if (p) void play(p); });
+    navigator.mediaSession.setActionHandler("seekbackward", (e) => { audio.currentTime = Math.max(0, audio.currentTime - (e.seekOffset || REWIND_SECS)); });
+    navigator.mediaSession.setActionHandler("seekforward", (e) => {
+      const t = audio.currentTime + (e.seekOffset || FORWARD_SECS);
+      audio.currentTime = Number.isFinite(audio.duration) ? Math.min(audio.duration, t) : t;
+    });
   } catch { /* 部分 handler 不支持无妨 */ }
 }
 
@@ -330,6 +343,7 @@ let lastSnap: FolderSnapshot | null = null;
 function watch(folder: string): void {
   unwatch?.();
   currentFolder = folder;
+  renderScope();
   unwatch = store.files.watchFolder(folder, (snap) => {
     lastSnap = snap;
     tracks = snap.items.map((i) => i.path).filter((p) => AUDIO_EXT.has(p.split(".").pop()!.toLowerCase()));
@@ -412,12 +426,19 @@ function addNavRow(icon: string, text: string, onclick: () => void): void {
   listEl.append(row);
 }
 
-// ── 控件 ────────────────────────────────────────────────────────────────
+// ── 控件（v1 tile 格：回退10s/上一曲 | 大播放键 | 前进30s/下一曲 | 音量条）──────
 const bigPlay = $("bigPlay");
 const bigPlayIcon = $("bigPlayIcon") as unknown as SVGUseElement;
+const REWIND_SECS = 10, FORWARD_SECS = 30;
+const prevOf = (list: string[], cur: string | null): string | null => {
+  if (!list.length) return null;
+  const i = cur ? list.indexOf(cur) : -1;
+  return i <= 0 ? list[list.length - 1] : list[i - 1];
+};
 function renderControls(): void {
   bigPlayIcon.setAttribute("href", audio.paused ? "#play" : "#pause");
-  $("modeLabel").textContent = mode === "single" ? "单曲循环" : "顺序循环";
+  const r = document.querySelector<HTMLInputElement>(`input[name="loop"][value="${mode}"]`);
+  if (r) r.checked = true;
 }
 bigPlay.onclick = () => {
   if (!audio.paused) { audio.pause(); return; }
@@ -426,38 +447,61 @@ bigPlay.onclick = () => {
   else setStatus("本夹没有可播的曲子——点开一个文件夹");
 };
 $("nextBtn").onclick = () => { const n = current ? nextOf(tracks, current) : tracks[0]; if (n) void play(n); };
-$("modeBtn").onclick = () => {
-  mode = mode === "single" ? "folder" : "single";
-  audio.loop = mode === "single";
-  log(`模式 → ${mode === "single" ? "单曲循环" : "顺序循环"}`);
-  renderControls();
-  savePlayback();
-  if (mode === "folder" && current) void prefetchNextHead(current);
+$("prevBtn").onclick = () => { const p = prevOf(tracks, current); if (p) void play(p); };   // 复播规则：点曲从 0
+$("rewindBtn").onclick = () => { if (current) audio.currentTime = Math.max(0, audio.currentTime - REWIND_SECS); };
+$("forwardBtn").onclick = () => {
+  if (!current) return;
+  const t = audio.currentTime + FORWARD_SECS;
+  audio.currentTime = Number.isFinite(audio.duration) ? Math.min(audio.duration, t) : t;
 };
+// 音量（iOS audio.volume 只读 → 整条藏掉，v1 同款检测；音量暂不持久化——落 device-state 需走持久化同意流程）
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+if (IS_IOS) document.body.classList.add("no-volume");
+const volumeBar = $("volumeBar") as unknown as HTMLInputElement;
+audio.volume = 0.8;
+volumeBar.oninput = () => { audio.volume = Number(volumeBar.value) / 100; };
+// 循环模式（抽屉 radio，v1 语言）
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name="loop"]')) {
+  r.onchange = () => {
+    mode = r.value === "single" ? "single" : "folder";
+    audio.loop = mode === "single";
+    log(`模式 → ${mode === "single" ? "单曲循环" : "顺序循环"}`);
+    savePlayback();
+    if (mode === "folder" && current) void prefetchNextHead(current);
+  };
+}
 
-// ── 云菜单（登录/登出/刷新；2026-08-20 user：云按钮进主界面）─────────────────
-const cloudMenu = $("cloudMenu");
-const cloudIconUse = $("cloudBtn").querySelector("use")!;
+// ── 抽屉菜单（v1 语言：☰ 开、backdrop/✕ 收、动作后自动收）────────────────────
+const menuDrawer = $("menuDrawer");
+const menuBackdrop = $("menuBackdrop");
 let bridgeStop: ((opts?: { wipe?: boolean }) => void) | null = null;
 function renderCloud(): void {
   const signed = auth.isSignedIn();
-  cloudIconUse.setAttribute("href", signed ? "#cloud-synced" : "#cloud-unavailable");
   $("cloudWho").textContent = signed ? String((auth.getActiveAccount() as { username?: string })?.username ?? "已登录") : "未登录";
   $("authLabel").textContent = signed ? "登出" : "登录";
+  renderScope();
 }
-$("cloudBtn").onclick = () => {
-  cloudMenu.hidden = !cloudMenu.hidden;
+function openMenu(): void {
+  menuDrawer.classList.add("open");
+  menuBackdrop.classList.add("show");
+  menuDrawer.setAttribute("aria-hidden", "false");
   renderCloud();
-  if (!cloudMenu.hidden) {   // 缓存占用（origin 级估算，含 staging/本地副本/壳缓存）
-    void navigator.storage?.estimate?.().then((est) => {
-      if (est?.usage != null) $("usageNote").textContent = `本机占用约 ${(est.usage / 1048576).toFixed(0)} MB`;
-    }).catch(() => {});
-  }
-};
-document.addEventListener("click", (e) => { if (!cloudMenu.hidden && !cloudMenu.contains(e.target as Node) && !(e.target as Element).closest?.("#cloudBtn")) cloudMenu.hidden = true; });
-$("refreshBtn").onclick = () => { cloudMenu.hidden = true; log("手动刷新列表"); watch(currentFolder); };
+  // 缓存占用（origin 级估算，含 staging/本地副本/壳缓存）
+  void navigator.storage?.estimate?.().then((est) => {
+    if (est?.usage != null) $("usageNote").textContent = `本机占用约 ${(est.usage / 1048576).toFixed(0)} MB`;
+  }).catch(() => {});
+}
+function closeMenu(): void {
+  menuDrawer.classList.remove("open");
+  menuBackdrop.classList.remove("show");
+  menuDrawer.setAttribute("aria-hidden", "true");
+}
+$("menuToggle").onclick = openMenu;
+$("menuClose").onclick = closeMenu;
+menuBackdrop.onclick = closeMenu;
+$("refreshBtn").onclick = () => { log("手动刷新列表"); watch(currentFolder); };
 $("authBtn").onclick = () => {
-  cloudMenu.hidden = true;
+  closeMenu();
   if (auth.isSignedIn()) {
     void (async () => {
       bridgeStop?.({ wipe: true });
@@ -476,7 +520,6 @@ $("authBtn").onclick = () => {
 };
 
 // ── boot ────────────────────────────────────────────────────────────────
-$("ver").textContent = `v${APP_VERSION}`;
 navigator.serviceWorker.addEventListener("message", (e) => { const m = (e.data as { br2log?: string })?.br2log; if (m) log(`[SW] ${m}`); });
 let booted = false;
 function proceedSignedIn(): void {
@@ -490,7 +533,7 @@ function proceedSignedIn(): void {
   watch(currentFolder);
 }
 (async () => {
-  log(`背景电台 v${APP_VERSION} 启动`);
+  log(`Background Radio v${APP_VERSION} 启动`);
   renderControls();
   await ensureSw();
   await deviceState.init();
@@ -508,10 +551,11 @@ function proceedSignedIn(): void {
       btn.onclick = () => { btn.hidden = true; void play(saved.current!, { resumeAt: pos }); };
       // 开机就把上次进度画在条上（2026-08-20 user：回到车里大脑音频记忆能对上「断在哪」）
       nowTitle.textContent = `⏸ ${shortName(saved.current)}（上次）`;
+      posCur.textContent = fmtTime(pos);
       if (saved.duration && saved.duration > 0) {
         progressBar.style.width = `${Math.min(100, (pos / saved.duration) * 100)}%`;
-        timeLabel.textContent = `上次听到 ${fmtTime(pos)} / ${fmtTime(saved.duration)}`;
-      } else timeLabel.textContent = `上次听到 ${fmtTime(pos)}`;
+        posDur.textContent = fmtTime(saved.duration);
+      }
     }
   }
   const st = await auth.initAuth();
