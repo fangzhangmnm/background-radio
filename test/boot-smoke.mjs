@@ -43,7 +43,9 @@ const checks = [
   [(await page.locator("#prevBtn").count()) === 1 && (await page.locator("#rewindBtn").count()) === 1, "tile 控制格在（prev/rewind）"],
   [(await page.locator('input[name="loop"]').count()) === 2, "循环模式 radio 在"],
   [menuOpen, "抽屉菜单点开"],
-  [(await page.locator("#authLabel").innerText()) === "登录", "未登录时菜单显「登录」"],
+  [(await page.locator("#cloudWho").innerText()).includes("未登录"), "未登录时账号节显提示"],
+  [await page.locator("#authBtn").isHidden(), "未登录时登出钮藏起"],
+  [(await page.locator("#cloudBtn").count()) === 1, "smart cloud 按钮在"],
   [(await page.locator("svg use").count()) > 0, "图标 sprite 接上"],
 ];
 // MSAL 静默探测在无账号 headless 下的网络/授权报错属预期；其余 console/page 错误都算失败。

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none">
 <!--
-  7 icons extracted from the family icon library (../20260708 SVG Icons/icons.svg) by extract-icons.py — do not hand-edit; re-run the script instead.
+  11 icons extracted from the family icon library (../20260708 SVG Icons/icons.svg) by extract-icons.py — do not hand-edit; re-run the script instead.
   Family SVG Icons — MIT License, Copyright (c) 2026 fangzhangmnm.
   Contains work derived from (per-icon provenance in data-src):
     Feather Icons — MIT License, Copyright (c) 2013-2023 Cole Bemis · https://github.com/feathericons/feather
@@ -20,8 +20,15 @@
   <!-- x — 叉 -->
   <symbol id="x" data-cat="common" data-src="own" data-note="叉" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5 L17.5 17.5 M17.5 6.5 L6.5 17.5"/></symbol>
   <!-- cloud -->
-  <!-- refresh — 刷新:顺时针 3/4 圆 + 箭头(从 12 点绕到 9 点, 箭头尖在右上) -->
-  <symbol id="refresh" data-cat="cloud" data-src="own" data-note="刷新:顺时针 3/4 圆 + 箭头(从 12 点绕到 9 点, 箭头尖在右上)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 顺时针 3/4 圆 + 箭头：从 12 点出发顺时针绕到 9 点；箭头尖在右上 --> <path d="M21 12a9 9 0 1 1-3.5-7.1"/> <polyline points="21 4 21 9 16 9"/></symbol>
   <!-- download — 下载 -->
   <symbol id="download" data-cat="cloud" data-src="feather:download" data-note="下载" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+  <!-- cloud-synced — 云+勾 -->
+  <symbol id="cloud-synced" data-cat="cloud" data-src="feather:cloud" data-note="云+勾" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></symbol>
+  <symbol id="cloud-unavailable" data-cat="cloud" data-src="feather:cloud" data-note="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><line x1="3" y1="3" x2="21" y2="21"/></symbol>
+  <!-- cloud-pending — 待判定:虚线云 + 云内问号(加粗 2.4, 遮罩描边留白与云脱开;问号下点的半径=描边半宽) -->
+  <symbol id="cloud-pending" data-cat="cloud" data-src="own" data-note="待判定:虚线云 + 云内问号(加粗 2.4, 遮罩描边留白与云脱开;问号下点的半径=描边半宽)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icQC"><rect width="24" height="24" fill="#fff" stroke="none"/><g transform="translate(-6.00 -8.10) scale(1.500)" stroke="#000" fill="#000" stroke-width="3.33" stroke-linecap="round"><path d="M10.2 12.1a1.9 1.9 0 1 1 2.6 1.75c-.55.25-.8.7-.8 1.35v.4" fill="none"/><circle cx="12" cy="17.5" r="1.67" stroke="none"/></g></mask><g mask="url(#icQC)"><g transform="translate(0 0) scale(1.0)" stroke-width="1.70"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" stroke-dasharray="2.50 2.50"/></g></g><g transform="translate(-6.00 -8.10) scale(1.500)" stroke-width="1.60"><path d="M10.2 12.1a1.9 1.9 0 1 1 2.6 1.75c-.55.25-.8.7-.8 1.35v.4"/><circle cx="12" cy="17.5" r="0.80" fill="currentColor" stroke="none"/></g></symbol>
+  <!-- cloud-busy-base — 云端忙 静态件:云轮廓中心挖圆洞, 与 cloud-busy-spinner 叠放合成一个资产 -->
+  <symbol id="cloud-busy-base" data-cat="cloud" data-src="own" data-note="云端忙 静态件:云轮廓中心挖圆洞, 与 cloud-busy-spinner 叠放合成一个资产" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icCBB"><rect width="24" height="24" fill="#fff" stroke="none"/><circle cx="12" cy="12" r="4.9" fill="#000" stroke="none"/></mask><g mask="url(#icCBB)"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></g></symbol>
+  <!-- cloud-busy-spinner — 云端忙 旋转件:弧+箭头, 圆心正在 (12,12) 所以 CSS rotate 原地转不甩 -->
+  <symbol id="cloud-busy-spinner" data-cat="cloud" data-src="own" data-note="云端忙 旋转件:弧+箭头, 圆心正在 (12,12) 所以 CSS rotate 原地转不甩" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.00 8.70 A3.3 3.3 0 1 1 8.90 13.13"/><path d="M10.66 14.61 L8.90 13.13 L8.50 15.39"/></symbol>
 </svg>

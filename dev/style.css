@@ -67,7 +67,11 @@ body { background: var(--bg-canvas); min-height: 100dvh; position: relative; ove
   cursor: pointer; flex-shrink: 0;
 }
 .menu-btn span { display: block; width: 16px; height: 1.5px; background: currentColor; opacity: 0.7; }
+.menu-btn.icon-btn { position: relative; }
 .menu-btn.icon-btn .ic { width: 16px; height: 16px; opacity: 0.7; vertical-align: 0; }
+.cloud-spin { position: absolute; inset: 0; margin: auto; animation: cloud-spin 0.8s linear infinite; }
+.cloud-spin[hidden] { display: none; }
+@keyframes cloud-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .menu-btn:hover { background: var(--hover); }
 .menu-btn:active { background: var(--active); }
 

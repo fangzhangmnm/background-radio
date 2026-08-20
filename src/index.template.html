@@ -21,7 +21,10 @@
       <div id="nowTitle" class="status-track">Radio</div>
       <div id="statusScope" class="status-scope"></div>
     </div>
-    <button id="refreshBtn" class="menu-btn icon-btn" aria-label="刷新列表" title="刷新列表"><svg class="ic"><use href="#refresh"/></svg></button>
+    <button id="cloudBtn" class="menu-btn icon-btn" aria-label="云端" title="云端（未登录点=登录；已登录点=刷新列表）">
+      <svg class="ic"><use id="cloudIcon" href="#cloud-unavailable"/></svg>
+      <svg class="ic cloud-spin" id="cloudSpin" hidden><use href="#cloud-busy-spinner"/></svg>
+    </button>
     <button id="menuToggle" class="menu-btn" aria-label="菜单" title="菜单"><span></span><span></span><span></span></button>
   </header>
 
@@ -64,8 +67,8 @@
   </header>
   <section class="menu-section">
     <h3>账号</h3>
-    <div id="cloudWho" class="user-name">未登录</div>
-    <div class="menu-row"><button id="authBtn" class="ghost"><span id="authLabel">登录</span></button></div>
+    <div id="cloudWho" class="user-name">未登录——点顶栏云按钮登录</div>
+    <div class="menu-row"><button id="authBtn" class="ghost" hidden>登出</button></div>
   </section>
   <section class="menu-section">
     <h3>循环模式</h3>

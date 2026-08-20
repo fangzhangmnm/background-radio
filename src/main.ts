@@ -10,6 +10,7 @@ import { createStore, createOneDriveProvider, type FolderSnapshot } from "@inter
 import { startSwAuthBridge } from "@internal/store/sw";
 import { CLIENT_ID, AUTHORITY, SCOPES, APP_VERSION } from "./config.ts";
 import { nextOf, resolveAvail, classifyNextReady, decideBoundary, decideStartPlayback, decideHeal, decideRecovery, retryDelayMs, type NextReady } from "./player-logic.ts";
+import { id3TagFullSize, parseId3 } from "./id3.ts";
 
 const APP_ID = "br";
 const DB_NAME = `${APP_ID}.defaultStore`;
@@ -307,20 +308,52 @@ progressWrap.onclick = (e) => {
 };
 
 // ── Media Session（锁屏/蓝牙键）────────────────────────────────────────────
+// ID3 就地解（2026-08-20 拍板）：头部字节播放时本来就进 staging，零额外流量；不做派生缓存，
+// 内存只留当前曲一张封面。artist 无则空串——不编「未知」不编 app 名（车上显示以收藏标签为准）。
+let artUrl: string | null = null;
+let msToken = 0;
+async function loadId3(name: string): Promise<{ title?: string; artist?: string; picture?: { mime: string; data: Uint8Array } } | null> {
+  try {
+    const h = await fileOf(name).openStream();
+    if (!h) return null;
+    try {
+      const head = new Uint8Array(await h.read(0, Math.min(10, h.totalSize)));
+      const full = id3TagFullSize(head);
+      if (!full) return null;
+      const take = Math.min(full, 10 * 1024 * 1024, h.totalSize);   // 病态巨 tag 护栏
+      return parseId3(new Uint8Array(await h.read(0, take)));
+    } finally { h.close(); }
+  } catch (e) { log(`ID3 读取失败：${name}：${(e as Error).message}`); return null; }
+}
 function setMediaSession(name: string): void {
   if (!("mediaSession" in navigator)) return;
-  try {
-    navigator.mediaSession.metadata = new MediaMetadata({ title: shortName(name), artist: "Background Radio" });
-    navigator.mediaSession.setActionHandler("play", () => void audio.play());
-    navigator.mediaSession.setActionHandler("pause", () => audio.pause());
-    navigator.mediaSession.setActionHandler("nexttrack", () => { const n = current && nextOf(tracks, current); if (n) void play(n); });
-    navigator.mediaSession.setActionHandler("previoustrack", () => { const p = prevOf(tracks, current); if (p) void play(p); });
-    navigator.mediaSession.setActionHandler("seekbackward", (e) => { audio.currentTime = Math.max(0, audio.currentTime - (e.seekOffset || REWIND_SECS)); });
-    navigator.mediaSession.setActionHandler("seekforward", (e) => {
-      const t = audio.currentTime + (e.seekOffset || FORWARD_SECS);
-      audio.currentTime = Number.isFinite(audio.duration) ? Math.min(audio.duration, t) : t;
-    });
-  } catch { /* 部分 handler 不支持无妨 */ }
+  const apply = (title: string, artist: string, artwork: MediaImage[]): void => {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title, artist, artwork });
+      navigator.mediaSession.setActionHandler("play", () => void audio.play());
+      navigator.mediaSession.setActionHandler("pause", () => audio.pause());
+      navigator.mediaSession.setActionHandler("nexttrack", () => { const n = current && nextOf(tracks, current); if (n) void play(n); });
+      navigator.mediaSession.setActionHandler("previoustrack", () => { const p = prevOf(tracks, current); if (p) void play(p); });
+      navigator.mediaSession.setActionHandler("seekbackward", (e) => { audio.currentTime = Math.max(0, audio.currentTime - (e.seekOffset || REWIND_SECS)); });
+      navigator.mediaSession.setActionHandler("seekforward", (e) => {
+        const t = audio.currentTime + (e.seekOffset || FORWARD_SECS);
+        audio.currentTime = Number.isFinite(audio.duration) ? Math.min(audio.duration, t) : t;
+      });
+    } catch { /* 部分 handler 不支持无妨 */ }
+  };
+  apply(shortName(name), "", []);   // 先立即上文件名，ID3 解出来再覆盖
+  const tok = ++msToken;
+  void loadId3(name).then((tag) => {
+    if (tok !== msToken || !tag) return;   // 已换曲：丢弃
+    if (artUrl) { URL.revokeObjectURL(artUrl); artUrl = null; }
+    const artwork: MediaImage[] = [];
+    if (tag.picture) {
+      artUrl = URL.createObjectURL(new Blob([tag.picture.data as unknown as BlobPart], { type: tag.picture.mime }));
+      artwork.push({ src: artUrl, type: tag.picture.mime });
+    }
+    apply(tag.title || shortName(name), tag.artist || "", artwork);
+    log(`ID3：${tag.title ?? "（无标题帧）"}${tag.artist ? ` / ${tag.artist}` : ""}${tag.picture ? " +封面" : ""}`);
+  });
 }
 
 // ── 设备态持久化（local-only；节流 5s）──────────────────────────────────────
@@ -348,6 +381,7 @@ function watch(folder: string): void {
     lastSnap = snap;
     tracks = snap.items.map((i) => i.path).filter((p) => AUDIO_EXT.has(p.split(".").pop()!.toLowerCase()));
     log(`列举帧：${snap.items.length} 项 ${snap.folders.length} 夹${snap.stale ? "（stale 首帧）" : ""}${snap.complete ? "（云端权威）" : ""}`);
+    if (snap.complete) refreshDone();   // smart cloud 转圈收口=等到云端权威帧
     renderList();
     if (current && mode === "folder") void prefetchNextHead(current);   // 列表变了 → 重备战（防陈 flag）
   });
@@ -471,14 +505,50 @@ for (const r of document.querySelectorAll<HTMLInputElement>('input[name="loop"]'
   };
 }
 
+// ── smart cloud 按钮（2026-08-20 grill 拍板）：未登录点=直接 signIn；已登录点=刷新当前夹（转圈）；
+//    离线已登录=cloud-pending，点了照样试刷（iOS onLine 有说谎前科，不拦动作只拦不住实话）。────────
+const cloudIcon = $("cloudIcon") as unknown as SVGUseElement;
+const cloudSpin = $("cloudSpin");
+let refreshBusy = false;
+let busyTimer: ReturnType<typeof setTimeout> | undefined;
+function renderCloudBtn(): void {
+  cloudIcon.setAttribute("href",
+    refreshBusy ? "#cloud-busy-base" : !auth.isSignedIn() ? "#cloud-unavailable" : navigator.onLine ? "#cloud-synced" : "#cloud-pending");
+  cloudSpin.hidden = !refreshBusy;
+}
+function refreshDone(): void {
+  if (!refreshBusy) return;
+  refreshBusy = false;
+  clearTimeout(busyTimer);
+  renderCloudBtn();
+}
+function manualRefresh(): void {
+  log(`手动刷新列表${navigator.onLine ? "" : "（onLine 说是离线——照样试）"}`);
+  refreshBusy = true;
+  renderCloudBtn();
+  clearTimeout(busyTimer);
+  busyTimer = setTimeout(() => { if (refreshBusy) { refreshBusy = false; renderCloudBtn(); setStatus("刷新没等到云端权威帧——离线？显示的是本地帧"); } }, 10_000);
+  watch(currentFolder);
+}
+$("cloudBtn").onclick = () => {
+  if (auth.isSignedIn()) { manualRefresh(); return; }
+  // 未登录点=直接 signIn（loginRedirect）：**同步调、前面零 await**（iOS user-gesture 要求，auth.ts:199 注）。
+  try {
+    void Promise.resolve(auth.signIn()).catch((e) => { log(`signIn 失败：${(e as Error).message}`); setStatus(`登录失败：${(e as Error).message}`); });
+  } catch (e) { log(`signIn 同步抛错：${(e as Error).message}`); setStatus(`登录失败：${(e as Error).message}`); }
+};
+addEventListener("online", renderCloudBtn);
+addEventListener("offline", renderCloudBtn);
+
 // ── 抽屉菜单（v1 语言：☰ 开、backdrop/✕ 收、动作后自动收）────────────────────
 const menuDrawer = $("menuDrawer");
 const menuBackdrop = $("menuBackdrop");
 let bridgeStop: ((opts?: { wipe?: boolean }) => void) | null = null;
 function renderCloud(): void {
   const signed = auth.isSignedIn();
-  $("cloudWho").textContent = signed ? String((auth.getActiveAccount() as { username?: string })?.username ?? "已登录") : "未登录";
-  $("authLabel").textContent = signed ? "登出" : "登录";
+  $("cloudWho").textContent = signed ? String((auth.getActiveAccount() as { username?: string })?.username ?? "已登录") : "未登录——点顶栏云按钮登录";
+  $("authBtn").hidden = !signed;
+  renderCloudBtn();
   renderScope();
 }
 function openMenu(): void {
@@ -499,24 +569,14 @@ function closeMenu(): void {
 $("menuToggle").onclick = openMenu;
 $("menuClose").onclick = closeMenu;
 menuBackdrop.onclick = closeMenu;
-$("refreshBtn").onclick = () => { log("手动刷新列表"); watch(currentFolder); };
-$("authBtn").onclick = () => {
+$("authBtn").onclick = () => {   // 登出专用（登录入口唯一=顶栏云按钮，不双置）
   closeMenu();
-  if (auth.isSignedIn()) {
-    void (async () => {
-      bridgeStop?.({ wipe: true });
-      await auth.signOut();
-      log("已登出（本 app 缓存已清，不踢微软会话）");
-      renderCloud();
-    })();
-    return;
-  }
-  // 真 signIn（loginRedirect）：**同步调、前面零 await**（iOS user-gesture 要求，auth.ts:199 注）。
-  // redirectUri = 本页 origin+pathname → Azure 注册 …/background-radio/dev/（2026-08-20 user 已加）。
-  // 失败只明说，不迂回旧版页（2026-08-20 user：dev channel 对 prod 无知）。
-  try {
-    void Promise.resolve(auth.signIn()).catch((e) => { log(`signIn 失败：${(e as Error).message}`); setStatus(`登录失败：${(e as Error).message}`); });
-  } catch (e) { log(`signIn 同步抛错：${(e as Error).message}`); setStatus(`登录失败：${(e as Error).message}`); }
+  void (async () => {
+    bridgeStop?.({ wipe: true });
+    await auth.signOut();
+    log("已登出（本 app 缓存已清，不踢微软会话）");
+    renderCloud();
+  })();
 };
 
 // ── boot ────────────────────────────────────────────────────────────────

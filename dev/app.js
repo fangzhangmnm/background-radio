@@ -4474,7 +4474,7 @@ var CHUNK_DEFAULT2 = 2 * 1024 * 1024;
 var CLIENT_ID2 = "aa43a186-25cd-4140-ade9-c0abd6ce5cb6";
 var AUTHORITY2 = "https://login.microsoftonline.com/common";
 var SCOPES2 = ["Files.ReadWrite.AppFolder", "offline_access"];
-var APP_VERSION = "0.1.3";
+var APP_VERSION = "0.2.2";
 
 // src/player-logic.ts
 async function resolveAvail(f) {
@@ -4528,6 +4528,93 @@ function decideHeal(i) {
   if (i.loopEngaged && i.nextReady && (i.online || i.nextReady.full)) out.push("unloop");
   if ((i.loopEngaged || !i.nextReady) && i.online) out.push("re-arm");
   return out;
+}
+
+// src/id3.ts
+var syncsafe = (b, i) => (b[i] & 127) << 21 | (b[i + 1] & 127) << 14 | (b[i + 2] & 127) << 7 | b[i + 3] & 127;
+var be32 = (b, i) => b[i] << 24 | b[i + 1] << 16 | b[i + 2] << 8 | b[i + 3];
+var be24 = (b, i) => b[i] << 16 | b[i + 1] << 8 | b[i + 2];
+var ascii = (b, i, n) => String.fromCharCode(...b.subarray(i, i + n));
+function id3TagFullSize(head) {
+  if (head.length < 10 || ascii(head, 0, 3) !== "ID3") return 0;
+  const major = head[3];
+  if (major < 2 || major > 4) return 0;
+  return 10 + syncsafe(head, 6) + (head[5] & 16 ? 10 : 0);
+}
+function decodeText(enc, b) {
+  let s;
+  if (enc === 0) s = new TextDecoder("latin1").decode(b);
+  else if (enc === 3) s = new TextDecoder("utf-8").decode(b);
+  else {
+    let label = enc === 2 ? "utf-16be" : "utf-16le";
+    if (enc === 1 && b.length >= 2) {
+      if (b[0] === 254 && b[1] === 255) {
+        label = "utf-16be";
+        b = b.subarray(2);
+      } else if (b[0] === 255 && b[1] === 254) {
+        label = "utf-16le";
+        b = b.subarray(2);
+      }
+    }
+    s = new TextDecoder(label).decode(b);
+  }
+  return s.replace(/\0+$/, "").trim();
+}
+function skipTerminated(b, i, enc) {
+  if (enc === 1 || enc === 2) {
+    for (; i + 1 < b.length; i += 2) if (b[i] === 0 && b[i + 1] === 0) return i + 2;
+    return -1;
+  }
+  for (; i < b.length; i++) if (b[i] === 0) return i + 1;
+  return -1;
+}
+function parsePicture(body, v22) {
+  if (body.length < 4) return void 0;
+  const enc = body[0];
+  let mime, i;
+  if (v22) {
+    const fmt = ascii(body, 1, 3).toUpperCase();
+    mime = fmt === "PNG" ? "image/png" : "image/jpeg";
+    i = 4;
+  } else {
+    const end = body.indexOf(0, 1);
+    if (end < 0) return void 0;
+    mime = ascii(body, 1, end - 1) || "image/jpeg";
+    i = end + 1;
+  }
+  i += 1;
+  i = skipTerminated(body, i, enc);
+  if (i < 0 || i >= body.length) return void 0;
+  return { mime, data: body.subarray(i) };
+}
+function parseId3(buf) {
+  const full = id3TagFullSize(buf);
+  if (!full) return null;
+  const major = buf[3];
+  if (buf[5] & 128) return null;
+  const end = Math.min(buf.length, 10 + syncsafe(buf, 6));
+  let i = 10;
+  if (buf[5] & 64 && major >= 3) {
+    const ext = major === 4 ? syncsafe(buf, i) : be32(buf, i) + 4;
+    i += ext;
+  }
+  const tag = {};
+  const idLen = major === 2 ? 3 : 4;
+  const headLen = major === 2 ? 6 : 10;
+  while (i + headLen <= end) {
+    if (buf[i] === 0) break;
+    const id = ascii(buf, i, idLen);
+    const size = major === 2 ? be24(buf, i + 3) : major === 3 ? be32(buf, i + 4) : syncsafe(buf, i + 4);
+    const flags2 = major === 2 ? 0 : buf[i + 9];
+    const body = buf.subarray(i + headLen, Math.min(i + headLen + size, end));
+    i += headLen + size;
+    if (size <= 0 || body.length === 0) continue;
+    if (major === 4 && flags2 & 15) continue;
+    if (id === "TIT2" || id === "TT2") tag.title ||= decodeText(body[0], body.subarray(1));
+    else if (id === "TPE1" || id === "TP1") tag.artist ||= decodeText(body[0], body.subarray(1));
+    else if ((id === "APIC" || id === "PIC") && !tag.picture) tag.picture = parsePicture(body, major === 2);
+  }
+  return tag.title || tag.artist || tag.picture ? tag : null;
 }
 
 // src/main.ts
@@ -4899,29 +4986,67 @@ progressWrap.onclick = (e) => {
   audio.currentTime = frac * dur;
   log(`seek \u2192 ${fmtTime(frac * dur)}`);
 };
+var artUrl = null;
+var msToken = 0;
+async function loadId3(name) {
+  try {
+    const h = await fileOf(name).openStream();
+    if (!h) return null;
+    try {
+      const head = new Uint8Array(await h.read(0, Math.min(10, h.totalSize)));
+      const full = id3TagFullSize(head);
+      if (!full) return null;
+      const take = Math.min(full, 10 * 1024 * 1024, h.totalSize);
+      return parseId3(new Uint8Array(await h.read(0, take)));
+    } finally {
+      h.close();
+    }
+  } catch (e) {
+    log(`ID3 \u8BFB\u53D6\u5931\u8D25\uFF1A${name}\uFF1A${e.message}`);
+    return null;
+  }
+}
 function setMediaSession(name) {
   if (!("mediaSession" in navigator)) return;
-  try {
-    navigator.mediaSession.metadata = new MediaMetadata({ title: shortName(name), artist: "Background Radio" });
-    navigator.mediaSession.setActionHandler("play", () => void audio.play());
-    navigator.mediaSession.setActionHandler("pause", () => audio.pause());
-    navigator.mediaSession.setActionHandler("nexttrack", () => {
-      const n = current && nextOf(tracks, current);
-      if (n) void play(n);
-    });
-    navigator.mediaSession.setActionHandler("previoustrack", () => {
-      const p = prevOf(tracks, current);
-      if (p) void play(p);
-    });
-    navigator.mediaSession.setActionHandler("seekbackward", (e) => {
-      audio.currentTime = Math.max(0, audio.currentTime - (e.seekOffset || REWIND_SECS));
-    });
-    navigator.mediaSession.setActionHandler("seekforward", (e) => {
-      const t = audio.currentTime + (e.seekOffset || FORWARD_SECS);
-      audio.currentTime = Number.isFinite(audio.duration) ? Math.min(audio.duration, t) : t;
-    });
-  } catch {
-  }
+  const apply = (title, artist, artwork) => {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title, artist, artwork });
+      navigator.mediaSession.setActionHandler("play", () => void audio.play());
+      navigator.mediaSession.setActionHandler("pause", () => audio.pause());
+      navigator.mediaSession.setActionHandler("nexttrack", () => {
+        const n = current && nextOf(tracks, current);
+        if (n) void play(n);
+      });
+      navigator.mediaSession.setActionHandler("previoustrack", () => {
+        const p = prevOf(tracks, current);
+        if (p) void play(p);
+      });
+      navigator.mediaSession.setActionHandler("seekbackward", (e) => {
+        audio.currentTime = Math.max(0, audio.currentTime - (e.seekOffset || REWIND_SECS));
+      });
+      navigator.mediaSession.setActionHandler("seekforward", (e) => {
+        const t = audio.currentTime + (e.seekOffset || FORWARD_SECS);
+        audio.currentTime = Number.isFinite(audio.duration) ? Math.min(audio.duration, t) : t;
+      });
+    } catch {
+    }
+  };
+  apply(shortName(name), "", []);
+  const tok = ++msToken;
+  void loadId3(name).then((tag) => {
+    if (tok !== msToken || !tag) return;
+    if (artUrl) {
+      URL.revokeObjectURL(artUrl);
+      artUrl = null;
+    }
+    const artwork = [];
+    if (tag.picture) {
+      artUrl = URL.createObjectURL(new Blob([tag.picture.data], { type: tag.picture.mime }));
+      artwork.push({ src: artUrl, type: tag.picture.mime });
+    }
+    apply(tag.title || shortName(name), tag.artist || "", artwork);
+    log(`ID3\uFF1A${tag.title ?? "\uFF08\u65E0\u6807\u9898\u5E27\uFF09"}${tag.artist ? ` / ${tag.artist}` : ""}${tag.picture ? " +\u5C01\u9762" : ""}`);
+  });
 }
 var lastSaveAt = 0;
 function savePlayback() {
@@ -4951,6 +5076,7 @@ function watch(folder) {
     lastSnap = snap;
     tracks = snap.items.map((i) => i.path).filter((p) => AUDIO_EXT.has(p.split(".").pop().toLowerCase()));
     log(`\u5217\u4E3E\u5E27\uFF1A${snap.items.length} \u9879 ${snap.folders.length} \u5939${snap.stale ? "\uFF08stale \u9996\u5E27\uFF09" : ""}${snap.complete ? "\uFF08\u4E91\u7AEF\u6743\u5A01\uFF09" : ""}`);
+    if (snap.complete) refreshDone();
     renderList();
     if (current && mode === "folder") void prefetchNextHead(current);
   });
@@ -5107,13 +5233,62 @@ for (const r of document.querySelectorAll('input[name="loop"]')) {
     if (mode === "folder" && current) void prefetchNextHead(current);
   };
 }
+var cloudIcon = $("cloudIcon");
+var cloudSpin = $("cloudSpin");
+var refreshBusy = false;
+var busyTimer;
+function renderCloudBtn() {
+  cloudIcon.setAttribute(
+    "href",
+    refreshBusy ? "#cloud-busy-base" : !auth.isSignedIn() ? "#cloud-unavailable" : navigator.onLine ? "#cloud-synced" : "#cloud-pending"
+  );
+  cloudSpin.hidden = !refreshBusy;
+}
+function refreshDone() {
+  if (!refreshBusy) return;
+  refreshBusy = false;
+  clearTimeout(busyTimer);
+  renderCloudBtn();
+}
+function manualRefresh() {
+  log(`\u624B\u52A8\u5237\u65B0\u5217\u8868${navigator.onLine ? "" : "\uFF08onLine \u8BF4\u662F\u79BB\u7EBF\u2014\u2014\u7167\u6837\u8BD5\uFF09"}`);
+  refreshBusy = true;
+  renderCloudBtn();
+  clearTimeout(busyTimer);
+  busyTimer = setTimeout(() => {
+    if (refreshBusy) {
+      refreshBusy = false;
+      renderCloudBtn();
+      setStatus("\u5237\u65B0\u6CA1\u7B49\u5230\u4E91\u7AEF\u6743\u5A01\u5E27\u2014\u2014\u79BB\u7EBF\uFF1F\u663E\u793A\u7684\u662F\u672C\u5730\u5E27");
+    }
+  }, 1e4);
+  watch(currentFolder);
+}
+$("cloudBtn").onclick = () => {
+  if (auth.isSignedIn()) {
+    manualRefresh();
+    return;
+  }
+  try {
+    void Promise.resolve(auth.signIn()).catch((e) => {
+      log(`signIn \u5931\u8D25\uFF1A${e.message}`);
+      setStatus(`\u767B\u5F55\u5931\u8D25\uFF1A${e.message}`);
+    });
+  } catch (e) {
+    log(`signIn \u540C\u6B65\u629B\u9519\uFF1A${e.message}`);
+    setStatus(`\u767B\u5F55\u5931\u8D25\uFF1A${e.message}`);
+  }
+};
+addEventListener("online", renderCloudBtn);
+addEventListener("offline", renderCloudBtn);
 var menuDrawer = $("menuDrawer");
 var menuBackdrop = $("menuBackdrop");
 var bridgeStop = null;
 function renderCloud() {
   const signed = auth.isSignedIn();
-  $("cloudWho").textContent = signed ? String(auth.getActiveAccount()?.username ?? "\u5DF2\u767B\u5F55") : "\u672A\u767B\u5F55";
-  $("authLabel").textContent = signed ? "\u767B\u51FA" : "\u767B\u5F55";
+  $("cloudWho").textContent = signed ? String(auth.getActiveAccount()?.username ?? "\u5DF2\u767B\u5F55") : "\u672A\u767B\u5F55\u2014\u2014\u70B9\u9876\u680F\u4E91\u6309\u94AE\u767B\u5F55";
+  $("authBtn").hidden = !signed;
+  renderCloudBtn();
   renderScope();
 }
 function openMenu() {
@@ -5134,30 +5309,14 @@ function closeMenu() {
 $("menuToggle").onclick = openMenu;
 $("menuClose").onclick = closeMenu;
 menuBackdrop.onclick = closeMenu;
-$("refreshBtn").onclick = () => {
-  log("\u624B\u52A8\u5237\u65B0\u5217\u8868");
-  watch(currentFolder);
-};
 $("authBtn").onclick = () => {
   closeMenu();
-  if (auth.isSignedIn()) {
-    void (async () => {
-      bridgeStop?.({ wipe: true });
-      await auth.signOut();
-      log("\u5DF2\u767B\u51FA\uFF08\u672C app \u7F13\u5B58\u5DF2\u6E05\uFF0C\u4E0D\u8E22\u5FAE\u8F6F\u4F1A\u8BDD\uFF09");
-      renderCloud();
-    })();
-    return;
-  }
-  try {
-    void Promise.resolve(auth.signIn()).catch((e) => {
-      log(`signIn \u5931\u8D25\uFF1A${e.message}`);
-      setStatus(`\u767B\u5F55\u5931\u8D25\uFF1A${e.message}`);
-    });
-  } catch (e) {
-    log(`signIn \u540C\u6B65\u629B\u9519\uFF1A${e.message}`);
-    setStatus(`\u767B\u5F55\u5931\u8D25\uFF1A${e.message}`);
-  }
+  void (async () => {
+    bridgeStop?.({ wipe: true });
+    await auth.signOut();
+    log("\u5DF2\u767B\u51FA\uFF08\u672C app \u7F13\u5B58\u5DF2\u6E05\uFF0C\u4E0D\u8E22\u5FAE\u8F6F\u4F1A\u8BDD\uFF09");
+    renderCloud();
+  })();
 };
 navigator.serviceWorker.addEventListener("message", (e) => {
   const m = e.data?.br2log;

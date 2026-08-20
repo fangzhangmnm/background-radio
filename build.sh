@@ -6,6 +6,7 @@ ESBUILD="../20260524 WebPaint/tools/esbuild/esbuild"
 [ -x "$ESBUILD" ] || { echo "缺 esbuild：$ESBUILD（先在 WebPaint 跑一次 build.sh 让它自动 curl）" >&2; exit 1; }
 npx tsc --noEmit
 node test/player-logic.test.mjs
+node test/id3.test.mjs
 "$ESBUILD" src/main.ts --bundle --format=esm  --target=safari16 --outfile=dev/app.js
 "$ESBUILD" src/sw.ts   --bundle --format=iife --target=safari16 --outfile=dev/sw.js
 python3 - << 'PY'
