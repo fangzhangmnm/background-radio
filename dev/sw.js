@@ -431,7 +431,7 @@
   async function shellNetworkFirst(req) {
     const c = await caches.open(SHELL_CACHE);
     try {
-      const r = await fetch(req);
+      const r = await fetch(req, { cache: "no-cache" });
       if (r.ok) void c.put(req, r.clone());
       return r;
     } catch {

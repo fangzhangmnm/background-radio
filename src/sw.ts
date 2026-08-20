@@ -30,7 +30,8 @@ sw.addEventListener("activate", (e) => { e.waitUntil(sw.clients.claim()); });
 async function shellNetworkFirst(req: Request): Promise<Response> {
   const c = await caches.open(SHELL_CACHE);
   try {
-    const r = await fetch(req);
+    // no-cache：绕过 HTTP 缓存直问源站（Pages max-age=600 曾让 network-first 名存实亡，拿回来的还是本地陈货）
+    const r = await fetch(req, { cache: "no-cache" });
     if (r.ok) void c.put(req, r.clone());
     return r;
   } catch {
