@@ -9,5 +9,9 @@
   },
   "devDependencies": {
     "typescript": "^5.9.2"
+  },
+  "scripts": {
+    "build": "bash build.sh",
+    "smoke": "node test/boot-smoke.mjs"
   }
 }

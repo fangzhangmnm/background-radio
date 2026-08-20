@@ -4687,6 +4687,7 @@ function startPlayback(name, opts) {
   void audio.play().then(() => log(`\u25B6 \u64AD\u653E\uFF1A${name}`)).catch((e) => log(`play() \u62D2\u7EDD\uFF1A${e.message}`));
   nowTitle.textContent = `\u25B6 ${shortName(name)}`;
   setStatus("");
+  $("resumeBtn").hidden = true;
   setMediaSession(name);
   void prefetchNextHead(name);
   savePlayback();
@@ -4844,6 +4845,7 @@ function healCheck(trigger) {
 addEventListener("online", () => healCheck("online \u4E8B\u4EF6"));
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) healCheck("\u56DE\u524D\u53F0");
+  else savePlayback();
 });
 var stallStrikes = 0;
 var lastWallSeen = -1;
@@ -4860,6 +4862,36 @@ setInterval(() => {
     lastWallSeen = lastMediaWall;
   } else stallStrikes = 0;
 }, 8e3);
+var progressWrap = $("progressWrap");
+var progressBar = $("progressBar");
+var timeLabel = $("timeLabel");
+var fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+function renderProgress() {
+  const dur = audio.duration;
+  if (!current || !Number.isFinite(dur) || dur <= 0) {
+    progressBar.style.width = "0";
+    timeLabel.textContent = "";
+    return;
+  }
+  progressBar.style.width = `${audio.currentTime / dur * 100}%`;
+  timeLabel.textContent = `${fmtTime(audio.currentTime)} / ${fmtTime(dur)}`;
+  if ("mediaSession" in navigator) {
+    try {
+      navigator.mediaSession.setPositionState?.({ duration: dur, playbackRate: audio.playbackRate, position: Math.min(audio.currentTime, dur) });
+    } catch {
+    }
+  }
+}
+audio.addEventListener("timeupdate", renderProgress);
+audio.addEventListener("durationchange", renderProgress);
+progressWrap.onclick = (e) => {
+  const dur = audio.duration;
+  if (!current || !Number.isFinite(dur) || dur <= 0) return;
+  const r = progressWrap.getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  audio.currentTime = frac * dur;
+  log(`seek \u2192 ${fmtTime(frac * dur)}`);
+};
 function setMediaSession(name) {
   if (!("mediaSession" in navigator)) return;
   try {
@@ -4876,7 +4908,13 @@ function setMediaSession(name) {
 var lastSaveAt = 0;
 function savePlayback() {
   try {
-    deviceState.setItem("playback", { folder: currentFolder, current, position: Math.floor(audio.currentTime || 0), mode });
+    deviceState.setItem("playback", {
+      folder: currentFolder,
+      current,
+      position: Math.floor(audio.currentTime || 0),
+      duration: Number.isFinite(audio.duration) ? Math.floor(audio.duration) : 0,
+      mode
+    });
     lastSaveAt = Date.now();
   } catch {
   }
@@ -5034,6 +5072,12 @@ function renderCloud() {
 $("cloudBtn").onclick = () => {
   cloudMenu.hidden = !cloudMenu.hidden;
   renderCloud();
+  if (!cloudMenu.hidden) {
+    void navigator.storage?.estimate?.().then((est) => {
+      if (est?.usage != null) $("usageNote").textContent = `\u672C\u673A\u5360\u7528\u7EA6 ${(est.usage / 1048576).toFixed(0)} MB`;
+    }).catch(() => {
+    });
+  }
 };
 document.addEventListener("click", (e) => {
   if (!cloudMenu.hidden && !cloudMenu.contains(e.target) && !e.target.closest?.("#cloudBtn")) cloudMenu.hidden = true;
@@ -5043,25 +5087,25 @@ $("refreshBtn").onclick = () => {
   log("\u624B\u52A8\u5237\u65B0\u5217\u8868");
   watch(currentFolder);
 };
-$("authBtn").onclick = async () => {
+$("authBtn").onclick = () => {
   cloudMenu.hidden = true;
   if (auth.isSignedIn()) {
-    bridgeStop?.({ wipe: true });
-    await auth.signOut();
-    log("\u5DF2\u767B\u51FA\uFF08\u672C app \u7F13\u5B58\u5DF2\u6E05\uFF0C\u4E0D\u8E22\u5FAE\u8F6F\u4F1A\u8BDD\uFF09");
-    renderCloud();
+    void (async () => {
+      bridgeStop?.({ wipe: true });
+      await auth.signOut();
+      log("\u5DF2\u767B\u51FA\uFF08\u672C app \u7F13\u5B58\u5DF2\u6E05\uFF0C\u4E0D\u8E22\u5FAE\u8F6F\u4F1A\u8BDD\uFF09");
+      renderCloud();
+    })();
     return;
   }
-  if (location.pathname.includes("/dev/")) {
-    setStatus("\u5DF2\u6253\u5F00\u65E7\u7248\u9875\u767B\u5F55\u2014\u2014\u767B\u5F55\u5B8C\u6210\u56DE\u672C\u9875\u4F1A\u81EA\u52A8\u63A5\u4E0A");
-    log("\u767B\u5F55\uFF1A\u5F00\u65E7\u7248\u9875\uFF08/dev/ \u65E0 redirectUri\uFF09");
-    window.open("../", "_blank");
-  } else {
-    try {
-      await auth.signIn();
-    } catch (e) {
-      log(`\u767B\u5F55\u5931\u8D25\uFF1A${e.message}`);
-    }
+  try {
+    void Promise.resolve(auth.signIn()).catch((e) => {
+      log(`signIn \u5931\u8D25\uFF1A${e.message}`);
+      setStatus(`\u767B\u5F55\u5931\u8D25\uFF1A${e.message}`);
+    });
+  } catch (e) {
+    log(`signIn \u540C\u6B65\u629B\u9519\uFF1A${e.message}`);
+    setStatus(`\u767B\u5F55\u5931\u8D25\uFF1A${e.message}`);
   }
 };
 $("ver").textContent = `v${APP_VERSION}`;
@@ -5092,13 +5136,18 @@ function proceedSignedIn() {
     renderControls();
     if (saved.current) {
       const btn = $("resumeBtn");
-      const mm = Math.floor((saved.position ?? 0) / 60), ss = (saved.position ?? 0) % 60;
-      btn.textContent = `\u25B6 \u7EE7\u7EED\u4E0A\u6B21\uFF1A${shortName(saved.current)}\uFF08${mm}:${String(ss).padStart(2, "0")}\uFF09`;
+      const pos = saved.position ?? 0;
+      btn.textContent = `\u25B6 \u7EE7\u7EED\u4E0A\u6B21\uFF1A${shortName(saved.current)}\uFF08${fmtTime(pos)}\uFF09`;
       btn.hidden = false;
       btn.onclick = () => {
         btn.hidden = true;
-        void play(saved.current, { resumeAt: saved.position ?? 0 });
+        void play(saved.current, { resumeAt: pos });
       };
+      nowTitle.textContent = `\u23F8 ${shortName(saved.current)}\uFF08\u4E0A\u6B21\uFF09`;
+      if (saved.duration && saved.duration > 0) {
+        progressBar.style.width = `${Math.min(100, pos / saved.duration * 100)}%`;
+        timeLabel.textContent = `\u4E0A\u6B21\u542C\u5230 ${fmtTime(pos)} / ${fmtTime(saved.duration)}`;
+      } else timeLabel.textContent = `\u4E0A\u6B21\u542C\u5230 ${fmtTime(pos)}`;
     }
   }
   const st = await auth.initAuth();

@@ -57,7 +57,7 @@ async function sniffAudio(plain: Blob): Promise<boolean> {
 }
 // 设备态（per-device，local-only collection：永不上云）：上次播放 = 唯一的「中间复播」来源。
 const deviceState = store.collection("device-state", { local: true });
-interface PlaybackState { folder: string; current: string | null; position: number; mode: "folder" | "single" }
+interface PlaybackState { folder: string; current: string | null; position: number; duration?: number; mode: "folder" | "single" }
 
 // ── SW 注册 + 等接管（spike-3 战例：强刷后 SW 不控页 → 软刷接回）───────────────
 const streamPrefix = new URL("./stream/", location.href).pathname;
@@ -138,6 +138,7 @@ function startPlayback(name: string, opts?: { resumeAt?: number }): void {
   void audio.play().then(() => log(`▶ 播放：${name}`)).catch((e) => log(`play() 拒绝：${e.message}`));
   nowTitle.textContent = `▶ ${shortName(name)}`;
   setStatus("");
+  $("resumeBtn").hidden = true;   // 开机继续键：一旦播了任何东西就退场
   setMediaSession(name);
   void prefetchNextHead(name);
   savePlayback();
@@ -258,7 +259,10 @@ function healCheck(trigger: string): void {
   applyHeal(trigger);
 }
 addEventListener("online", () => healCheck("online 事件"));
-document.addEventListener("visibilitychange", () => { if (!document.hidden) healCheck("回前台"); });
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) healCheck("回前台");
+  else savePlayback();   // 退后台立存进度（iOS 随时可能杀 app——「继续上次」的数据源）
+});
 let stallStrikes = 0, lastWallSeen = -1;
 setInterval(() => {   // 看门狗（spike 二轮战例：亮屏回 wifi 时 online/visibility 事件全没来）
   if (!current) return;
@@ -269,6 +273,31 @@ setInterval(() => {   // 看门狗（spike 二轮战例：亮屏回 wifi 时 onl
     lastWallSeen = lastMediaWall;
   } else stallStrikes = 0;
 }, 8000);
+
+// ── 进度条 + 时间（点条 seek——SW range 代理天然支持跳播）─────────────────────
+const progressWrap = $("progressWrap");
+const progressBar = $("progressBar");
+const timeLabel = $("timeLabel");
+const fmtTime = (s: number): string => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+function renderProgress(): void {
+  const dur = audio.duration;
+  if (!current || !Number.isFinite(dur) || dur <= 0) { progressBar.style.width = "0"; timeLabel.textContent = ""; return; }
+  progressBar.style.width = `${(audio.currentTime / dur) * 100}%`;
+  timeLabel.textContent = `${fmtTime(audio.currentTime)} / ${fmtTime(dur)}`;
+  if ("mediaSession" in navigator) {   // 锁屏进度条（best-effort，老 Safari 没有 setPositionState）
+    try { navigator.mediaSession.setPositionState?.({ duration: dur, playbackRate: audio.playbackRate, position: Math.min(audio.currentTime, dur) }); } catch { /* 无妨 */ }
+  }
+}
+audio.addEventListener("timeupdate", renderProgress);
+audio.addEventListener("durationchange", renderProgress);
+progressWrap.onclick = (e) => {
+  const dur = audio.duration;
+  if (!current || !Number.isFinite(dur) || dur <= 0) return;
+  const r = progressWrap.getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  audio.currentTime = frac * dur;
+  log(`seek → ${fmtTime(frac * dur)}`);
+};
 
 // ── Media Session（锁屏/蓝牙键）────────────────────────────────────────────
 function setMediaSession(name: string): void {
@@ -285,7 +314,10 @@ function setMediaSession(name: string): void {
 let lastSaveAt = 0;
 function savePlayback(): void {
   try {
-    deviceState.setItem("playback", { folder: currentFolder, current, position: Math.floor(audio.currentTime || 0), mode } satisfies PlaybackState);
+    deviceState.setItem("playback", {
+      folder: currentFolder, current, position: Math.floor(audio.currentTime || 0),
+      duration: Number.isFinite(audio.duration) ? Math.floor(audio.duration) : 0, mode,
+    } satisfies PlaybackState);
     lastSaveAt = Date.now();
   } catch { /* init 前的调用忽略 */ }
 }
@@ -413,27 +445,34 @@ function renderCloud(): void {
   $("cloudWho").textContent = signed ? String((auth.getActiveAccount() as { username?: string })?.username ?? "已登录") : "未登录";
   $("authLabel").textContent = signed ? "登出" : "登录";
 }
-$("cloudBtn").onclick = () => { cloudMenu.hidden = !cloudMenu.hidden; renderCloud(); };
+$("cloudBtn").onclick = () => {
+  cloudMenu.hidden = !cloudMenu.hidden;
+  renderCloud();
+  if (!cloudMenu.hidden) {   // 缓存占用（origin 级估算，含 staging/本地副本/壳缓存）
+    void navigator.storage?.estimate?.().then((est) => {
+      if (est?.usage != null) $("usageNote").textContent = `本机占用约 ${(est.usage / 1048576).toFixed(0)} MB`;
+    }).catch(() => {});
+  }
+};
 document.addEventListener("click", (e) => { if (!cloudMenu.hidden && !cloudMenu.contains(e.target as Node) && !(e.target as Element).closest?.("#cloudBtn")) cloudMenu.hidden = true; });
 $("refreshBtn").onclick = () => { cloudMenu.hidden = true; log("手动刷新列表"); watch(currentFolder); };
-$("authBtn").onclick = async () => {
+$("authBtn").onclick = () => {
   cloudMenu.hidden = true;
   if (auth.isSignedIn()) {
-    bridgeStop?.({ wipe: true });
-    await auth.signOut();
-    log("已登出（本 app 缓存已清，不踢微软会话）");
-    renderCloud();
+    void (async () => {
+      bridgeStop?.({ wipe: true });
+      await auth.signOut();
+      log("已登出（本 app 缓存已清，不踢微软会话）");
+      renderCloud();
+    })();
     return;
   }
-  // /dev/ 路径没在 Azure 注册 redirectUri（租户受限暂加不了）→ 开旧版页登录 + 本页静默接续（spike-2 机制）。
-  // cutover 到 / 后本判断自动走真 signIn。
-  if (location.pathname.includes("/dev/")) {
-    setStatus("已打开旧版页登录——登录完成回本页会自动接上");
-    log("登录：开旧版页（/dev/ 无 redirectUri）");
-    window.open("../", "_blank");
-  } else {
-    try { await auth.signIn(); } catch (e) { log(`登录失败：${(e as Error).message}`); }
-  }
+  // 真 signIn（loginRedirect）：**同步调、前面零 await**（iOS user-gesture 要求，auth.ts:199 注）。
+  // redirectUri = 本页 origin+pathname → Azure 注册 …/background-radio/dev/（2026-08-20 user 已加）。
+  // 失败只明说，不迂回旧版页（2026-08-20 user：dev channel 对 prod 无知）。
+  try {
+    void Promise.resolve(auth.signIn()).catch((e) => { log(`signIn 失败：${(e as Error).message}`); setStatus(`登录失败：${(e as Error).message}`); });
+  } catch (e) { log(`signIn 同步抛错：${(e as Error).message}`); setStatus(`登录失败：${(e as Error).message}`); }
 };
 
 // ── boot ────────────────────────────────────────────────────────────────
@@ -463,10 +502,16 @@ function proceedSignedIn(): void {
     renderControls();
     if (saved.current) {
       const btn = $("resumeBtn");
-      const mm = Math.floor((saved.position ?? 0) / 60), ss = (saved.position ?? 0) % 60;
-      btn.textContent = `▶ 继续上次：${shortName(saved.current)}（${mm}:${String(ss).padStart(2, "0")}）`;
+      const pos = saved.position ?? 0;
+      btn.textContent = `▶ 继续上次：${shortName(saved.current)}（${fmtTime(pos)}）`;
       btn.hidden = false;
-      btn.onclick = () => { btn.hidden = true; void play(saved.current!, { resumeAt: saved.position ?? 0 }); };
+      btn.onclick = () => { btn.hidden = true; void play(saved.current!, { resumeAt: pos }); };
+      // 开机就把上次进度画在条上（2026-08-20 user：回到车里大脑音频记忆能对上「断在哪」）
+      nowTitle.textContent = `⏸ ${shortName(saved.current)}（上次）`;
+      if (saved.duration && saved.duration > 0) {
+        progressBar.style.width = `${Math.min(100, (pos / saved.duration) * 100)}%`;
+        timeLabel.textContent = `上次听到 ${fmtTime(pos)} / ${fmtTime(saved.duration)}`;
+      } else timeLabel.textContent = `上次听到 ${fmtTime(pos)}`;
     }
   }
   const st = await auth.initAuth();

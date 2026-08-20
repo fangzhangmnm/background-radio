@@ -21,10 +21,13 @@
   <div id="cloudWho" class="menu-note">未登录</div>
   <button id="authBtn"><svg class="ic"><use href="#sign-out"/></svg><span id="authLabel">登录</span></button>
   <button id="refreshBtn"><svg class="ic"><use href="#refresh"/></svg>刷新列表</button>
+  <div id="usageNote" class="menu-note"></div>
 </div>
 <main>
   <section id="nowPlaying">
     <div id="nowTitle">未在播放</div>
+    <div id="progressWrap"><div id="progressBar"></div></div>
+    <div id="timeLabel"></div>
     <div id="controls">
       <button id="bigPlay" class="bigbtn" aria-label="播放/暂停"><svg class="ic-big"><use id="bigPlayIcon" href="#play"/></svg></button>
       <button id="nextBtn" class="ctlbtn" aria-label="下一曲"><svg class="ic"><use href="#skip-next"/></svg><span>下一曲</span></button>
