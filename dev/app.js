@@ -4472,7 +4472,7 @@ var CHUNK_DEFAULT2 = 2 * 1024 * 1024;
 
 // src/config.ts
 var CLIENT_ID2 = "aa43a186-25cd-4140-ade9-c0abd6ce5cb6";
-var AUTHORITY2 = "https://login.microsoftonline.com/common";
+var AUTHORITY2 = "https://login.microsoftonline.com/consumers";
 var SCOPES2 = ["Files.ReadWrite.AppFolder", "offline_access"];
 var APP_VERSION = "0.2.3";
 

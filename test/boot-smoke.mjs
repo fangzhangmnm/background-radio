@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const wpRequire = createRequire(new URL("../../20260524 WebPaint/package.json", import.meta.url));
+const wpRequire = createRequire(new URL("../../20260524 WeebPaint/package.json", import.meta.url));
 const { chromium } = wpRequire("playwright");
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".webmanifest": "application/manifest+json", ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml" };

@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 // tsc 产物不落仓：现场把 id3.ts 转成 mjs 临时件（esbuild 单文件，秒级）
 const tmp = mkdtempSync(join(tmpdir(), "br-id3-"));
-execSync(`"../20260524 WebPaint/tools/esbuild/esbuild" src/id3.ts --format=esm --outfile="${join(tmp, "id3.mjs")}"`, { stdio: "pipe" });
+execSync(`"../20260524 WeebPaint/tools/esbuild/esbuild" src/id3.ts --format=esm --outfile="${join(tmp, "id3.mjs")}"`, { stdio: "pipe" });
 const { id3TagFullSize, parseId3 } = await import(join(tmp, "id3.mjs"));
 
 const enc = new TextEncoder();
